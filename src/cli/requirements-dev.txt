@@ -43,7 +43,3 @@ ducklake>=0.1.0
 # API Server
 flask>=2.3.0
 flask-cors>=4.0.0
-
-# Added numpy as a required dependency for the CLI and tests
-numpy>=1.21.0
-pandas>=1.3.0 

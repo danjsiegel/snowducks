@@ -4,20 +4,77 @@
 
 # Before we load the extension, this will fail
 statement error
-SELECT snowducks('Sam');
+SELECT snowducks_info('test');
 ----
-Catalog Error: Scalar Function with name snowducks does not exist!
+Catalog Error: Scalar Function with name snowducks_info does not exist!
 
 # Require statement will ensure this test is run with this extension loaded
 require snowducks
 
-# Confirm the extension works
+# Test info function
 query I
-SELECT snowducks('Sam');
+SELECT snowducks_info('test');
 ----
-Snowducks Sam 🐥
+Snowducks test 🦆
+
+# Test query normalization
+query I
+SELECT snowducks_normalize_query_text('SELECT * FROM users LIMIT 1000');
+----
+select * from users limit 1000
 
 query I
-SELECT snowducks_openssl_version('Michael') ILIKE 'Snowducks Michael, my linked OpenSSL version is OpenSSL%';
+SELECT snowducks_normalize_query_text('  SELECT   *   FROM   users   LIMIT   1000  ');
+----
+select * from users limit 1000
+
+# Test cache table name generation
+query I
+SELECT snowducks_generate_cache_table_name('SELECT * FROM users LIMIT 1000');
+----
+t_36f8d20682e41db3
+
+# Test cache table name generation without LIMIT
+query I
+SELECT snowducks_generate_cache_table_name_without_limit('SELECT * FROM users LIMIT 1000');
+----
+t_19a1f14efc0f221d
+
+query I
+SELECT snowducks_generate_cache_table_name_without_limit('SELECT * FROM users');
+----
+t_19a1f14efc0f221d
+
+# Test LIMIT clause detection
+query I
+SELECT snowducks_has_limit_clause('SELECT * FROM users LIMIT 1000');
+----
+true
+
+query I
+SELECT snowducks_has_limit_clause('SELECT * FROM users');
+----
+false
+
+# Test LIMIT value extraction
+query I
+SELECT snowducks_extract_limit_value('SELECT * FROM users LIMIT 1000');
+----
+1000
+
+query I
+SELECT snowducks_extract_limit_value('SELECT * FROM users');
+----
+0
+
+# Test that same queries generate same table names
+query I
+SELECT snowducks_generate_cache_table_name('SELECT * FROM users LIMIT 1000') = snowducks_generate_cache_table_name('SELECT * FROM users LIMIT 1000');
+----
+true
+
+# Test that different queries generate different table names
+query I
+SELECT snowducks_generate_cache_table_name('SELECT * FROM users LIMIT 1000') != snowducks_generate_cache_table_name('SELECT * FROM orders LIMIT 1000');
 ----
 true

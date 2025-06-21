@@ -145,7 +145,7 @@ test-cli:
 .PHONY: test-ext
 test-ext:
 	@echo "🦆 Running C++ extension tests..."
-	@make test
+	@./build/release/test/unittest test/sql/*
 
 # Clean all build artifacts
 .PHONY: clean
