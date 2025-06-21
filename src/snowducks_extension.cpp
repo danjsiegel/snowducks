@@ -1017,16 +1017,15 @@ private:
 			fprintf(stderr, "DEBUG: Virtual table name: %s\n", bind_data.virtual_table_name.c_str());
 		}
 		
-		// For now, return the expected data directly
-		// In a full implementation, we'd read from the DuckLake table
-		// But we need to avoid SQL execution from within table functions to prevent deadlocks
+		// For now, return a simple result to avoid the complex DuckLake integration
+		// This will be replaced with actual data reading once we resolve the API issues
 		output.SetCardinality(1);
 		
-		// Set the first column to the count result (hardcoded for now)
-		output.data[0].SetValue(0, Value::DECIMAL(60, 18, 0));
+		// Return a simple message indicating the cache was found
+		output.data[0].SetValue(0, Value("Cached data available for: " + bind_data.cache_table_name));
 		
 		if (bind_data.debug) {
-			fprintf(stderr, "DEBUG: Returning 1 row of data\n");
+			fprintf(stderr, "DEBUG: Returning 1 row with cache info\n");
 		}
 		
 		// Mark as finished

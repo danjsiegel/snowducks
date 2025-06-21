@@ -1,16 +1,272 @@
 #!/usr/bin/env python3
 """
-SnowDucks UI - Temporarily Unavailable
-
-The UI functionality is being reorganized. For now, use the interactive CLI:
-
-./snowducksi start-duckdb
+SnowDucks UI - Interactive interface with C++ extension
+Provides a modern interface for running Snowflake queries with local caching.
 """
 
 import sys
+import os
+import signal
+import atexit
+import subprocess
+from pathlib import Path
 
-print("🔄 SnowDucks UI is temporarily unavailable during reorganization.")
-print("💡 Use the interactive CLI instead:")
-print("   ./snowducksi start-duckdb")
-print("📝 UI functionality will be restored in a future update.")
-sys.exit(1) 
+# Add the cli directory to the Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Global process for cleanup
+duckdb_process = None
+
+def cleanup_process():
+    """Clean up the DuckDB process on exit."""
+    global duckdb_process
+    if duckdb_process:
+        try:
+            duckdb_process.terminate()
+            duckdb_process.wait(timeout=5)
+        except Exception:
+            pass
+
+def signal_handler(signum, frame):
+    """Handle interrupt signals."""
+    print("\n👋 Goodbye!", file=sys.stderr)
+    cleanup_process()
+    sys.exit(0)
+
+def print_banner():
+    """Print the SnowDucks banner."""
+    print("""
+🦆 SnowDucks - Instant SQL for Snowflake
+==========================================
+Powered by DuckDB + C++ Extension + Local Caching
+
+Type your SQL queries and they'll be executed against Snowflake with intelligent caching.
+Use 'help' for usage examples, 'quit' to exit.
+""", file=sys.stderr)
+
+def print_help():
+    """Print help information."""
+    print("""
+📖 Usage Examples:
+==================
+
+1. Simple query with automatic caching:
+   SELECT * FROM snowducks_table('SELECT COUNT(*) FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.CUSTOMER')
+
+2. Query with custom limit:
+   SELECT * FROM snowducks_table('SELECT * FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.CUSTOMER', limit:=100)
+
+3. Force refresh cache:
+   SELECT * FROM snowducks_table('SELECT * FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.CUSTOMER', force_refresh:=true)
+
+4. Enable debug output:
+   SELECT * FROM snowducks_table('SELECT * FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.CUSTOMER', debug:=true)
+
+5. Combine parameters:
+   SELECT * FROM snowducks_table('SELECT * FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.CUSTOMER', limit:=500, debug:=true)
+
+🔧 Available Functions:
+======================
+- snowducks_table(query, limit:=1000, force_refresh:=false, debug:=false)
+- snowducks_info(name) - Get extension info
+- snowducks_normalize_query_text(query) - Normalize query text
+- snowducks_generate_cache_table_name(query) - Generate cache table name
+
+💡 Tips:
+========
+- Results are automatically cached in DuckLake
+- Use force_refresh:=true to bypass cache
+- The extension handles all Snowflake connectivity
+- Cache is stored in ~/.snowducks/data/
+""", file=sys.stderr)
+
+def find_extension_path():
+    """Find the path to the built C++ extension."""
+    # Get the project root directory (two levels up from cli)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    # Try multiple possible locations
+    possible_paths = [
+        os.path.join(project_root, "build/release/extension/snowducks/snowducks.duckdb_extension"),
+        os.path.join(project_root, "build/release/snowducks.duckdb_extension"),
+        "build/release/extension/snowducks/snowducks.duckdb_extension",
+        "build/release/snowducks.duckdb_extension",
+        "../build/release/extension/snowducks/snowducks.duckdb_extension",
+        "../build/release/snowducks.duckdb_extension",
+        "../../build/release/extension/snowducks/snowducks.duckdb_extension",
+        "../../build/release/snowducks.duckdb_extension",
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            return os.path.abspath(path)
+    
+    # If not found, try to build it from project root
+    print("🔨 C++ extension not found. Attempting to build...", file=sys.stderr)
+    try:
+        subprocess.run(["make", "build"], check=True, capture_output=True, cwd=project_root)
+        # Try again after build
+        for path in possible_paths:
+            if os.path.exists(path):
+                return os.path.abspath(path)
+    except subprocess.CalledProcessError:
+        pass
+    
+    raise FileNotFoundError("Could not find or build the C++ extension. Run 'make build' manually.")
+
+def find_duckdb_executable():
+    """Find the path to the built DuckDB executable."""
+    # Get the project root directory (two levels up from cli)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    duckdb_path = os.path.join(project_root, "build/release/duckdb")
+    if os.path.exists(duckdb_path):
+        return duckdb_path
+    
+    # Try alternative paths
+    alternative_paths = [
+        os.path.join(project_root, "build/release/duckdb"),
+        "build/release/duckdb",
+        "../build/release/duckdb",
+        "../../build/release/duckdb",
+    ]
+    
+    for path in alternative_paths:
+        if os.path.exists(path):
+            return os.path.abspath(path)
+    
+    raise FileNotFoundError(f"DuckDB executable not found. Tried: {duckdb_path}")
+
+def get_venv_python():
+    """Get the Python executable from the virtual environment."""
+    # Get the project root directory (two levels up from cli)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    venv_python = os.path.join(project_root, "venv/bin/python")
+    if os.path.exists(venv_python):
+        return venv_python
+    
+    # Try alternative paths
+    alternative_paths = [
+        os.path.join(project_root, "venv/bin/python"),
+        "venv/bin/python",
+        "../venv/bin/python",
+        "../../venv/bin/python",
+    ]
+    
+    for path in alternative_paths:
+        if os.path.exists(path):
+            return os.path.abspath(path)
+    
+    raise FileNotFoundError(f"Virtual environment Python not found. Run 'make venv' first.")
+
+def main():
+    global duckdb_process
+    
+    # Set up signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Register cleanup function
+    atexit.register(cleanup_process)
+    
+    print("🚀 Starting SnowDucks UI with C++ extension...", file=sys.stderr)
+    
+    try:
+        # Find the extension and DuckDB executable
+        extension_path = find_extension_path()
+        duckdb_executable = find_duckdb_executable()
+        venv_python = get_venv_python()
+        
+        print(f"📦 Loading C++ extension from: {extension_path}", file=sys.stderr)
+        print(f"🦆 Using built DuckDB: {duckdb_executable}", file=sys.stderr)
+        print(f"🐍 Using virtual environment: {venv_python}", file=sys.stderr)
+        
+        # Prepare DuckDB initialization commands
+        init_commands = [
+            f"LOAD '{extension_path}'",
+            "SELECT snowducks_info('extension') as status"
+        ]
+        
+        # Test the extension
+        test_command = "; ".join(init_commands)
+        result = subprocess.run([duckdb_executable, "-c", test_command], 
+                              capture_output=True, text=True, cwd=os.path.dirname(duckdb_executable))
+        
+        if result.returncode != 0:
+            print(f"❌ Failed to initialize extension: {result.stderr}", file=sys.stderr)
+            sys.exit(1)
+        
+        print("✅ C++ extension loaded successfully!", file=sys.stderr)
+        print(result.stdout)
+        
+        print_banner()
+        
+        # Check if we're in interactive mode (terminal)
+        if not sys.stdin.isatty():
+            # Non-interactive mode - read from stdin and exit
+            try:
+                for line in sys.stdin:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Execute the query using the built DuckDB
+                    result = subprocess.run([duckdb_executable, "-c", line], 
+                                          capture_output=True, text=True, cwd=os.path.dirname(duckdb_executable))
+                    
+                    if result.returncode != 0:
+                        print(f"❌ Error: {result.stderr}", file=sys.stderr)
+                    else:
+                        print(result.stdout)
+            except KeyboardInterrupt:
+                print("\n👋 Goodbye!", file=sys.stderr)
+        else:
+            # Interactive mode - start the interactive loop
+            print("snowducks> ", end="", flush=True, file=sys.stderr)
+            
+            while True:
+                try:
+                    # Read input from stdin
+                    line = input()
+                    
+                    if line.lower().strip() in ['quit', 'exit', 'q']:
+                        print("👋 Goodbye!", file=sys.stderr)
+                        break
+                    
+                    if line.lower().strip() == 'help':
+                        print_help()
+                        print("snowducks> ", end="", flush=True, file=sys.stderr)
+                        continue
+                    
+                    if not line.strip():
+                        print("snowducks> ", end="", flush=True, file=sys.stderr)
+                        continue
+                    
+                    # Execute the query using the built DuckDB
+                    result = subprocess.run([duckdb_executable, "-c", line], 
+                                          capture_output=True, text=True, cwd=os.path.dirname(duckdb_executable))
+                    
+                    if result.returncode != 0:
+                        print(f"❌ Error: {result.stderr}", file=sys.stderr)
+                    else:
+                        print(result.stdout)
+                    
+                    print("snowducks> ", end="", flush=True, file=sys.stderr)
+                    
+                except KeyboardInterrupt:
+                    print("\n👋 Goodbye!", file=sys.stderr)
+                    break
+                except EOFError:
+                    print("\n👋 Goodbye!", file=sys.stderr)
+                    break
+                except Exception as e:
+                    print(f"❌ Error: {e}", file=sys.stderr)
+                    print("snowducks> ", end="", flush=True, file=sys.stderr)
+    
+    except Exception as e:
+        print(f"❌ Failed to start SnowDucks UI: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main() 

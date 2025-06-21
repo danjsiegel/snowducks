@@ -37,6 +37,7 @@ help:
 	@echo ""
 	@echo "Usage:"
 	@echo "  make cli       - Start Python CLI"
+	@echo "  make ui        - Start SnowDucks UI with C++ extension"
 	@echo "  make duckdb    - Start DuckDB with extension loaded"
 	@echo ""
 	@echo "Environment:"
@@ -85,7 +86,7 @@ install:
 .PHONY: build
 build:
 	@echo "🔨 Building SnowDucks extension..."
-	@make
+	@OVERRIDE_GIT_DESCRIBE="v1.3.1-0-g0123456789" make
 	@echo "✅ Extension built successfully"
 
 # Validate and initialize configuration
@@ -114,6 +115,21 @@ cli:
 		exit 1; \
 	fi
 	@cd src/cli && ../../venv/bin/python -m snowducks.cli
+
+# Start SnowDucks UI with C++ extension
+.PHONY: ui
+ui:
+	@echo "🦆 Starting SnowDucks UI with C++ extension..."
+	@if [ ! -d "venv" ]; then \
+		echo "❌ Virtual environment not found. Run 'make init' first."; \
+		exit 1; \
+	fi
+	@if [ ! -f "build/release/extension/snowducks/snowducks.duckdb_extension" ]; then \
+		echo "❌ C++ extension not built. Run 'make build' first."; \
+		exit 1; \
+	fi
+	@echo "🚀 Starting DuckDB with UI extension and SnowDucks extension..."
+	@./build/release/duckdb -cmd "LOAD 'build/release/extension/snowducks/snowducks.duckdb_extension'; SELECT snowducks_info('extension') as status; INSTALL ducklake; LOAD ducklake; ATTACH 'ducklake:postgres:host=localhost port=5432 dbname=snowducks_metadata user=snowducks_user password=snowducks_password' AS metadata (DATA_PATH '~/.snowducks/data'); INSTALL ui; LOAD ui; CALL start_ui();" -ui
 
 # Start DuckDB with extension loaded
 .PHONY: duckdb
