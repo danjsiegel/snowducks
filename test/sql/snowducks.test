@@ -78,3 +78,32 @@ query I
 SELECT snowducks_generate_cache_table_name('SELECT * FROM users LIMIT 1000') != snowducks_generate_cache_table_name('SELECT * FROM orders LIMIT 1000');
 ----
 true
+
+# Test virtual table registration function
+query I
+SELECT snowducks_register_virtual_table('test_table', 'SELECT 1 as id, ''test'' as name');
+----
+Virtual table test_table registered successfully
+
+# Test that table function exists
+query I
+SELECT function_name FROM duckdb_functions() WHERE function_name = 'snowducks_table';
+----
+snowducks_table
+
+# Test table function with existing table
+query TTT
+SELECT * FROM snowducks_table('SELECT 1 as id, ''test'' as name') LIMIT 5;
+----
+
+# Test table function without query (should fail if table not in cache)
+statement error
+SELECT * FROM snowducks_table('nonexistent_table');
+----
+Failed to fetch data from Snowflake for query
+
+# Test table function with invalid query (should fail gracefully)
+statement error
+SELECT * FROM snowducks_table('SELECT * FROM nonexistent_table');
+----
+Failed to fetch data from Snowflake for query
