@@ -107,3 +107,21 @@ statement error
 SELECT * FROM snowducks_table('SELECT * FROM nonexistent_table');
 ----
 Failed to fetch data from Snowflake for query
+
+# Test table function with force=false (default)
+query TTT
+SELECT * FROM snowducks_table('SELECT COUNT(*) FROM SNOWFLAKE_SAMPLE_DATA.TPCDS_SF100TCL.CALL_CENTER', false)
+----
+COUNT(*)	60	cached
+
+# Test table function with force=true
+query TTT
+SELECT * FROM snowducks_table('SELECT COUNT(*) FROM SNOWFLAKE_SAMPLE_DATA.TPCDS_SF100TCL.CALL_CENTER', true)
+----
+COUNT(*)	60	cached
+
+# Test table function with force parameter omitted (should default to false)
+query TTT
+SELECT * FROM snowducks_table('SELECT COUNT(*) FROM SNOWFLAKE_SAMPLE_DATA.TPCDS_SF100TCL.CALL_CENTER')
+----
+COUNT(*)	60	cached
