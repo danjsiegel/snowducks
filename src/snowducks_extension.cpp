@@ -200,8 +200,8 @@ inline void SnowducksInfo(DataChunk &args, ExpressionState &state, Vector &resul
 }
 
 // Call Python CLI to fetch data from Snowflake with force refresh
-bool fetch_from_snowflake_force(const string &table_name, const string &query) {
-	fprintf(stderr, "DEBUG: fetch_from_snowflake_force called for: %s\n", table_name.c_str());
+bool fetch_from_snowflake_force(const string &table_name, const string &query, int limit = 1000) {
+	fprintf(stderr, "DEBUG: fetch_from_snowflake_force called for: %s with limit: %d\n", table_name.c_str(), limit);
 	
 	// Create a temporary script to fetch the data with force=true
 	string temp_script = "temp_fetch_force_" + table_name + ".py";
@@ -235,7 +235,8 @@ try:
 	# Execute the query and cache it with force_refresh=True
 	table_name = ')" + table_name + R"('
 	query = ')" + escaped_query + R"('
-	result_table, cache_status = snowflake_query(query, limit=1000, force_refresh=True)
+	limit = )" + std::to_string(limit) + R"(
+	result_table, cache_status = snowflake_query(query, limit=limit, force_refresh=True)
 	print(json.dumps({'success': True, 'table_name': result_table, 'cache_status': cache_status}))
 except ImportError as e:
 	# Handle missing dependencies (like pyarrow) in test environment
@@ -287,32 +288,214 @@ except Exception as e:
 bool check_postgres_metadata(const string &virtual_table_name) {
 	fprintf(stderr, "DEBUG: check_postgres_metadata called for: %s\n", virtual_table_name.c_str());
 	
-	// TODO: Implement PostgreSQL connection and metadata checking
-	// This should:
-	// 1. Connect to PostgreSQL using connection details from config
-	// 2. Query the metadata table for the virtual table name
-	// 3. Check creation_time, last_update, status
-	// 4. Compare against aging configuration (e.g., 24 hours)
-	// 5. Return true if metadata exists and is fresh
+	// Extract the cache table name from virtual table name (remove "snowducks_" prefix)
+	string cache_table_name = virtual_table_name;
+	if (cache_table_name.find("snowducks_") == 0) {
+		cache_table_name = cache_table_name.substr(10); // Remove "snowducks_" prefix
+	}
 	
-	// For now, return false to force fallback to Parquet file checking
-	fprintf(stderr, "DEBUG: PostgreSQL metadata checking not implemented yet\n");
-	return false;
+	// Create a temporary script to check metadata using DuckDB connection
+	string temp_script = "temp_check_metadata_" + cache_table_name + ".py";
+	fprintf(stderr, "DEBUG: Creating metadata check script: %s\n", temp_script.c_str());
+	
+	std::ofstream script_file(temp_script);
+	if (!script_file.is_open()) {
+		fprintf(stderr, "ERROR: Failed to create metadata check script file\n");
+		return false;
+	}
+	
+	script_file << R"(
+import sys
+import os
+import json
+from datetime import datetime, timezone, timedelta
+
+try:
+	sys.path.insert(0, 'src/cli')
+	from snowducks.config import SnowDucksConfig
+	from snowducks.ducklake_manager import DuckLakeManager
+	
+	# Get configuration
+	config = SnowDucksConfig.from_env()
+	
+	# Create DuckLake manager to access metadata through DuckDB
+	ducklake_manager = DuckLakeManager(config)
+	
+	# Check if the query exists in metadata and is fresh
+	query_hash = ')" + cache_table_name + R"('
+	
+	# Check if table exists in metadata using DuckDB connection
+	schema_name = ducklake_manager._get_schema_name()
+	result = ducklake_manager.duckdb_connection.execute(f"""
+		SELECT last_refresh, cache_max_age_hours 
+		FROM {schema_name}.snowducks_queries 
+		WHERE query_hash = ?
+	""", [query_hash]).fetchone()
+	
+	if not result:
+		print(json.dumps({'success': True, 'exists': False, 'reason': 'No metadata found'}))
+		sys.exit(0)
+	
+	last_refresh, max_age_hours = result
+	if not last_refresh:
+		print(json.dumps({'success': True, 'exists': False, 'reason': 'No refresh timestamp'}))
+		sys.exit(0)
+	
+	# Ensure last_refresh is timezone-aware
+	if last_refresh.tzinfo is None:
+		last_refresh = last_refresh.replace(tzinfo=timezone.utc)
+	
+	# Check if data is within the max age window
+	max_age = timedelta(hours=max_age_hours)
+	is_fresh = datetime.now(timezone.utc) - last_refresh < max_age
+	
+	print(json.dumps({
+		'success': True, 
+		'exists': True, 
+		'fresh': is_fresh,
+		'last_refresh': last_refresh.isoformat(),
+		'max_age_hours': max_age_hours,
+		'reason': 'Fresh' if is_fresh else 'Stale'
+	}))
+	
+except ImportError as e:
+	print(json.dumps({'success': False, 'error': 'Missing dependencies: ' + str(e)}))
+except Exception as e:
+	print(json.dumps({'success': False, 'error': str(e)}))
+)";
+	script_file.close();
+	fprintf(stderr, "DEBUG: Metadata check script written successfully\n");
+	
+	// Execute the Python script and capture output
+	string command = "python3 " + temp_script + " 2>&1";
+	fprintf(stderr, "DEBUG: Executing metadata check: %s\n", command.c_str());
+	
+	FILE* pipe = popen(command.c_str(), "r");
+	if (!pipe) {
+		fprintf(stderr, "ERROR: Failed to execute metadata check script\n");
+		remove(temp_script.c_str());
+		return false;
+	}
+	
+	// Read the output
+	string result;
+	char buffer[128];
+	while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+		result += buffer;
+	}
+	
+	fprintf(stderr, "DEBUG: Metadata check output: %s\n", result.c_str());
+	
+	// Close pipe and clean up
+	pclose(pipe);
+	remove(temp_script.c_str());
+	
+	// Parse JSON response
+	if (result.find("\"success\": false") != string::npos) {
+		fprintf(stderr, "ERROR: Metadata check failed\n");
+		return false;
+	}
+	
+	// Check if metadata exists and is fresh
+	bool exists = result.find("\"exists\": true") != string::npos;
+	bool fresh = result.find("\"fresh\": true") != string::npos;
+	
+	fprintf(stderr, "DEBUG: Metadata exists: %s, fresh: %s\n", exists ? "true" : "false", fresh ? "true" : "false");
+	
+	return exists && fresh;
 }
 
 // Check if virtual table exists in DuckDB info schema
 bool check_info_schema(const string &virtual_table_name) {
 	fprintf(stderr, "DEBUG: check_info_schema called for: %s\n", virtual_table_name.c_str());
 	
-	// TODO: Implement DuckDB info schema checking
-	// This should:
-	// 1. Query DuckDB's information_schema.tables
-	// 2. Check if the virtual table exists
-	// 3. Return true if table exists, false otherwise
+	// Create a temporary script to check DuckDB info schema using the same connection
+	string temp_script = "temp_check_info_schema_" + virtual_table_name + ".py";
+	fprintf(stderr, "DEBUG: Creating info schema check script: %s\n", temp_script.c_str());
 	
-	// For now, return true to assume table exists
-	fprintf(stderr, "DEBUG: Info schema checking not implemented yet, assuming table exists\n");
-	return true;
+	std::ofstream script_file(temp_script);
+	if (!script_file.is_open()) {
+		fprintf(stderr, "ERROR: Failed to create info schema check script file\n");
+		return false;
+	}
+	
+	script_file << R"(
+import sys
+import os
+import json
+
+try:
+	sys.path.insert(0, 'src/cli')
+	from snowducks.config import SnowDucksConfig
+	from snowducks.ducklake_manager import DuckLakeManager
+	
+	# Get configuration and use the same DuckDB connection
+	config = SnowDucksConfig.from_env()
+	ducklake_manager = DuckLakeManager(config)
+	
+	# Check if the virtual table exists in info schema
+	table_name = ')" + virtual_table_name + R"('
+	
+	# Query information_schema.tables using the same DuckDB connection
+	result = ducklake_manager.duckdb_connection.execute("""
+		SELECT COUNT(*) as table_count
+		FROM information_schema.tables 
+		WHERE table_name = ?
+	""", [table_name]).fetchone()
+	
+	table_exists = result[0] > 0 if result else False
+	
+	print(json.dumps({
+		'success': True, 
+		'exists': table_exists,
+		'table_name': table_name,
+		'reason': 'Table found' if table_exists else 'Table not found'
+	}))
+	
+except ImportError as e:
+	print(json.dumps({'success': False, 'error': 'Missing dependencies: ' + str(e)}))
+except Exception as e:
+	print(json.dumps({'success': False, 'error': str(e)}))
+)";
+	script_file.close();
+	fprintf(stderr, "DEBUG: Info schema check script written successfully\n");
+	
+	// Execute the Python script and capture output
+	string command = "python3 " + temp_script + " 2>&1";
+	fprintf(stderr, "DEBUG: Executing info schema check: %s\n", command.c_str());
+	
+	FILE* pipe = popen(command.c_str(), "r");
+	if (!pipe) {
+		fprintf(stderr, "ERROR: Failed to execute info schema check script\n");
+		remove(temp_script.c_str());
+		return false;
+	}
+	
+	// Read the output
+	string result;
+	char buffer[128];
+	while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+		result += buffer;
+	}
+	
+	fprintf(stderr, "DEBUG: Info schema check output: %s\n", result.c_str());
+	
+	// Close pipe and clean up
+	pclose(pipe);
+	remove(temp_script.c_str());
+	
+	// Parse JSON response
+	if (result.find("\"success\": false") != string::npos) {
+		fprintf(stderr, "ERROR: Info schema check failed\n");
+		return false;
+	}
+	
+	// Check if table exists
+	bool exists = result.find("\"exists\": true") != string::npos;
+	
+	fprintf(stderr, "DEBUG: Table exists in info schema: %s\n", exists ? "true" : "false");
+	
+	return exists;
 }
 
 // Check if virtual table exists and is fresh by checking PostgreSQL metadata
@@ -387,7 +570,9 @@ bool cache_file_exists(const string &table_name) {
 }
 
 // Call Python CLI to fetch data from Snowflake
-bool fetch_from_snowflake(const string &table_name, const string &query) {
+bool fetch_from_snowflake(const string &table_name, const string &query, int limit = 1000) {
+	fprintf(stderr, "DEBUG: fetch_from_snowflake called for: %s with limit: %d\n", table_name.c_str(), limit);
+	
 	// Create a temporary script to fetch the data
 	string temp_script = "temp_fetch_" + table_name + ".py";
 	std::ofstream script_file(temp_script);
@@ -412,7 +597,8 @@ try:
 	# Execute the query and cache it
 	table_name = ')" + table_name + R"('
 	query = ')" + escaped_query + R"('
-	result_table, cache_status = snowflake_query(query, limit=1000, force_refresh=False)
+	limit = )" + std::to_string(limit) + R"(
+	result_table, cache_status = snowflake_query(query, limit=limit, force_refresh=False)
 	print(json.dumps({'success': True, 'table_name': result_table, 'cache_status': cache_status}))
 except ImportError as e:
 	# Handle missing dependencies (like pyarrow) in test environment
@@ -460,8 +646,11 @@ struct SnowducksGlobalState : public GlobalTableFunctionState {
 class SnowducksTableFunction : public TableFunction {
 public:
 	SnowducksTableFunction() : TableFunction("snowducks_table", 
-		{LogicalType::VARCHAR, LogicalType::BOOLEAN}, // SQL query parameter (required), force refresh (optional)
+		{LogicalType::VARCHAR}, // SQL query parameter (required)
 		SnowducksTableFunc, SnowducksTableBind, SnowducksTableInit) {
+		// Add named parameters for optional arguments
+		named_parameters["limit"] = LogicalType::INTEGER;
+		named_parameters["force_refresh"] = LogicalType::BOOLEAN;
 	}
 
 private:
@@ -470,6 +659,7 @@ private:
 		string cache_table_name;
 		string virtual_table_name;
 		string cache_path;
+		int limit;
 		bool force_refresh;
 	};
 
@@ -484,13 +674,21 @@ private:
 		
 		result->original_query = input.inputs[0].GetValue<string>();
 		
-		// Get the force refresh parameter (defaults to false)
-		result->force_refresh = false;
-		if (input.inputs.size() >= 2) {
-			result->force_refresh = input.inputs[1].GetValue<bool>();
+		// Get the limit parameter from named parameters (defaults to 1000)
+		result->limit = 1000;
+		auto limit_it = input.named_parameters.find("limit");
+		if (limit_it != input.named_parameters.end()) {
+			result->limit = limit_it->second.GetValue<int32_t>();
 		}
 		
-		fprintf(stderr, "DEBUG: Force refresh: %s\n", result->force_refresh ? "true" : "false");
+		// Get the force refresh parameter from named parameters (defaults to false)
+		result->force_refresh = false;
+		auto force_it = input.named_parameters.find("force_refresh");
+		if (force_it != input.named_parameters.end()) {
+			result->force_refresh = force_it->second.GetValue<bool>();
+		}
+		
+		fprintf(stderr, "DEBUG: Limit: %d, Force refresh: %s\n", result->limit, result->force_refresh ? "true" : "false");
 		
 		// Generate cache table name from the query
 		string normalized_query = to_lowercase(result->original_query);
@@ -499,15 +697,15 @@ private:
 		// If force refresh is enabled, skip cache checking
 		if (result->force_refresh) {
 			fprintf(stderr, "DEBUG: Force refresh enabled, skipping cache check\n");
-			// Fetch from Snowflake with force=true
-			if (!fetch_from_snowflake_force(result->cache_table_name, result->original_query)) {
+			// Fetch from Snowflake with force=true and custom limit
+			if (!fetch_from_snowflake_force(result->cache_table_name, result->original_query, result->limit)) {
 				throw Exception(ExceptionType::INVALID_INPUT, "Failed to fetch data from Snowflake for query");
 			}
 		} else {
 			// Check if cache exists and is valid
 			if (!cache_file_exists(result->cache_table_name)) {
 				// Cache doesn't exist or is stale, fetch from Snowflake
-				if (!fetch_from_snowflake(result->cache_table_name, result->original_query)) {
+				if (!fetch_from_snowflake(result->cache_table_name, result->original_query, result->limit)) {
 					throw Exception(ExceptionType::INVALID_INPUT, "Failed to fetch data from Snowflake for query");
 				}
 			}
