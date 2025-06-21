@@ -1,0 +1,23 @@
+# name: test/sql/snowducks.test
+# description: test snowducks extension
+# group: [sql]
+
+# Before we load the extension, this will fail
+statement error
+SELECT snowducks('Sam');
+----
+Catalog Error: Scalar Function with name snowducks does not exist!
+
+# Require statement will ensure this test is run with this extension loaded
+require snowducks
+
+# Confirm the extension works
+query I
+SELECT snowducks('Sam');
+----
+Snowducks Sam 🐥
+
+query I
+SELECT snowducks_openssl_version('Michael') ILIKE 'Snowducks Michael, my linked OpenSSL version is OpenSSL%';
+----
+true

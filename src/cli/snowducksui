@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""
+SnowDucks UI - Temporarily Unavailable
+
+The UI functionality is being reorganized. For now, use the interactive CLI:
+
+./snowducksi start-duckdb
+"""
+
+import sys
+
+print("🔄 SnowDucks UI is temporarily unavailable during reorganization.")
+print("💡 Use the interactive CLI instead:")
+print("   ./snowducksi start-duckdb")
+print("📝 UI functionality will be restored in a future update.")
+sys.exit(1) 
