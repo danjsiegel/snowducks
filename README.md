@@ -41,7 +41,7 @@ This guarantees that queries always have the right data available before executi
 
 ```bash
 # Clone and setup
-git clone https://github.com/your-username/snowducks.git
+git clone https://github.com/danjsiegel/snowducks.git
 cd snowducks
 make init
 
@@ -494,16 +494,6 @@ Based on DuckLake's capabilities and community feedback opportunities, here are 
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-## Support
-
-- **Documentation**: [docs.snowducks.dev](https://docs.snowducks.dev)
-- **Issues**: [GitHub Issues](https://github.com/your-username/snowducks/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-username/snowducks/discussions)
-- **Discord**: [Join our community](https://discord.gg/snowducks)
 
 ## Acknowledgments
 
