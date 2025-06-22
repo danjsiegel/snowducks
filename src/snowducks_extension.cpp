@@ -24,6 +24,11 @@
 #else
 #include <unistd.h>
 #endif
+#include <cstring>
+#include <sys/wait.h>
+#include <openssl/sha.h>
+#include <algorithm>
+#include <cctype>
 
 namespace duckdb {
 
@@ -144,6 +149,42 @@ LogicalType parse_duckdb_type(const string &type_str) {
 	return LogicalType::VARCHAR;
 }
 
+// Function to load environment variables from .env file
+void load_env_file(const string& env_file_path) {
+	std::ifstream file(env_file_path);
+	if (!file.is_open()) {
+		return; // .env file not found, continue with existing environment
+	}
+	
+	string line;
+	while (std::getline(file, line)) {
+		// Skip empty lines and comments
+		if (line.empty() || line[0] == '#') {
+			continue;
+		}
+		
+		// Find the equals sign
+		size_t pos = line.find('=');
+		if (pos != string::npos) {
+			string key = line.substr(0, pos);
+			string value = line.substr(pos + 1);
+			
+			// Remove quotes if present
+			if (!value.empty() && (value[0] == '"' || value[0] == '\'')) {
+				value = value.substr(1);
+			}
+			if (!value.empty() && (value.back() == '"' || value.back() == '\'')) {
+				value = value.substr(0, value.length() - 1);
+			}
+			
+			// Only set if not already set
+			if (std::getenv(key.c_str()) == nullptr) {
+				setenv(key.c_str(), value.c_str(), 0);
+			}
+		}
+	}
+}
+
 struct SnowducksTableGlobalState : public GlobalTableFunctionState {
 	bool finished = false;
 };
@@ -176,6 +217,13 @@ private:
 
 		auto result = make_uniq<SnowducksTableBindData>();
 		result->original_query = input.inputs[0].GetValue<string>();
+
+		// Load environment variables from .env file
+		const char* home_dir = std::getenv("HOME");
+		if (home_dir) {
+			string env_file_path = string(home_dir) + "/Documents/projects/snowducks/.env";
+			load_env_file(env_file_path);
+		}
 
 		// Handle named parameters
 		result->limit = 1000; // Default limit
@@ -237,21 +285,21 @@ private:
 			string data_path = data_path_env ? string(data_path_env) : string(std::getenv("HOME")) + "/.snowducks/data";
 			
 			// Get PostgreSQL connection parameters - require environment variables
-			const char* pg_host = std::getenv("PG_HOST");
-			const char* pg_port = std::getenv("PG_PORT");
-			const char* pg_db = std::getenv("PG_DB");
-			const char* pg_user = std::getenv("PG_USER");
-			const char* pg_pass = std::getenv("PG_PASS");
+			const char* pg_host = std::getenv("POSTGRES_HOST");
+			const char* pg_port = std::getenv("POSTGRES_PORT");
+			const char* pg_db = std::getenv("POSTGRES_DATABASE");
+			const char* pg_user = std::getenv("POSTGRES_USER");
+			const char* pg_pass = std::getenv("POSTGRES_PASSWORD");
 			
 			// Check if all required PostgreSQL environment variables are set
 			if (!pg_host || !pg_port || !pg_db || !pg_user || !pg_pass) {
 				if (result->debug) {
-					std::cout << "DEBUG: Missing PostgreSQL environment variables. Required: PG_HOST, PG_PORT, PG_DB, PG_USER, PG_PASS" << std::endl;
+					std::cout << "DEBUG: Missing PostgreSQL environment variables. Required: POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DATABASE, POSTGRES_USER, POSTGRES_PASSWORD" << std::endl;
 				}
-				// Return a simple schema for error messages
+				// Return error message
 				names.push_back("error");
 				return_types.push_back(LogicalType::VARCHAR);
-				result->fetch_error = "Missing PostgreSQL environment variables. Required: PG_HOST, PG_PORT, PG_DB, PG_USER, PG_PASS";
+				result->fetch_error = "Missing PostgreSQL environment variables. Required: POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DATABASE, POSTGRES_USER, POSTGRES_PASSWORD";
 				result->column_names = names;
 				result->column_types = return_types;
 				return std::move(result);
@@ -546,6 +594,13 @@ private:
 		auto &bind_data = (SnowducksTableBindData &)*data_p.bind_data;
 		auto &global_state = (SnowducksTableGlobalState &)*data_p.global_state;
 		
+		// Load environment variables from .env file
+		const char* home_dir = std::getenv("HOME");
+		if (home_dir) {
+			string env_file_path = string(home_dir) + "/Documents/projects/snowducks/.env";
+			load_env_file(env_file_path);
+		}
+		
 		if (global_state.finished) {
 			return;
 		}
@@ -648,11 +703,12 @@ private:
 			// Get connection parameters from environment
 			const char* data_path_env = std::getenv("DUCKLAKE_DATA_PATH");
 			string data_path = data_path_env ? string(data_path_env) : string(std::getenv("HOME")) + "/.snowducks/data";
-			const char* pg_host = std::getenv("PG_HOST") ? std::getenv("PG_HOST") : "localhost";
-			const char* pg_port = std::getenv("PG_PORT") ? std::getenv("PG_PORT") : "5432";
-			const char* pg_db = std::getenv("PG_DB") ? std::getenv("PG_DB") : "snowducks_metadata";
-			const char* pg_user = std::getenv("PG_USER") ? std::getenv("PG_USER") : "snowducks_user";
-			const char* pg_pass = std::getenv("PG_PASS") ? std::getenv("PG_PASS") : "snowducks_password";
+			// Get PostgreSQL connection parameters with fallbacks for development
+			const char* pg_host = std::getenv("POSTGRES_HOST");
+			const char* pg_port = std::getenv("POSTGRES_PORT");
+			const char* pg_db = std::getenv("POSTGRES_DATABASE");
+			const char* pg_user = std::getenv("POSTGRES_USER");
+			const char* pg_pass = std::getenv("POSTGRES_PASSWORD");
 
 			string attach_sql = "ATTACH 'ducklake:postgres:host=" + string(pg_host) +
 								" port=" + string(pg_port) +
