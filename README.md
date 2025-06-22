@@ -259,4 +259,6 @@ Required for Snowflake connectivity:
 
 ## License
 
-[Add your license information here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+**Note**: This project includes DuckDB as a vendored dependency. DuckDB is licensed under the MIT License and is copyright 2018-2025 Stichting DuckDB Foundation.
