@@ -19,6 +19,11 @@
 #include "duckdb/main/database.hpp"
 #include <iostream>
 #include <glob.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace duckdb {
 
@@ -675,7 +680,26 @@ private:
 					std::cout << "DEBUG: Reading from table: " << full_table_name << std::endl;
 				}
 				
+				// Add retry mechanism for timing issues
+				int max_retries = 3;
+				int retry_count = 0;
 				auto select_result = read_conn.Query(select_sql);
+				
+				while (select_result->HasError() && retry_count < max_retries) {
+					if (bind_data.debug) {
+						std::cout << "DEBUG: Table not found, retrying in 1 second... (attempt " << (retry_count + 1) << "/" << max_retries << ")" << std::endl;
+					}
+					
+					// Wait 1 second before retrying
+					#ifdef _WIN32
+					Sleep(1000);
+					#else
+					sleep(1);
+					#endif
+					
+					retry_count++;
+					select_result = read_conn.Query(select_sql);
+				}
 				
 				if (!select_result->HasError()) {
 					if (bind_data.debug) {
