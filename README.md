@@ -1,264 +1,468 @@
 # SnowDucks 🦆
 
-Intelligent query caching for Snowflake using DuckDB (DuckLake) as a local cache.
+A powerful DuckDB extension that seamlessly bridges Snowflake and DuckDB through intelligent caching and instant SQL execution.
 
 ## Overview
 
-SnowDucks provides intelligent query caching for Snowflake, storing query results locally in DuckDB for faster subsequent executions. It includes both a Python CLI and a C++ DuckDB extension.
+SnowDucks provides a unified interface for querying Snowflake data with automatic caching in Parquet format. It combines the performance of DuckDB with the scalability of Snowflake, offering:
 
-## Features
+- **🚀 Instant Query Execution**: Cached queries return results immediately
+- **💾 Intelligent Caching**: Automatic Parquet file caching with smart invalidation
+- **🔗 Seamless Integration**: Works as both a DuckDB extension and Python CLI
+- **⚡ Performance**: Local DuckDB performance for cached data
+- **🔄 Automatic Sync**: Fresh data from Snowflake when cache is stale
 
-- **Intelligent Caching**: Automatically caches Snowflake query results in local DuckDB
-- **LIMIT-Aware Hashing**: Different cache entries for different LIMIT values
-- **Python CLI**: Interactive command-line interface with Snowflake connectivity
-- **C++ Extension**: Native DuckDB extension with utility functions
-- **Consistent Hashing**: Same cache keys between Python CLI and C++ extension
-- **Universal Configuration**: Single config works for both local and S3 deployments
-- **Docker Support**: Cross-platform deployment with reproducible builds
-
-## Project Structure
-
-This project follows the DuckDB extension template structure with additional Python CLI components:
+## Architecture
 
 ```
-snowducks/
-├── src/                    # Source code
-│   ├── snowducks_extension.cpp  # C++ extension source
-│   ├── include/           # C++ headers
-│   └── cli/               # Python CLI implementation
-│       ├── snowducks/     # Python package
-│       ├── pyproject.toml # Python dependencies
-│       └── requirements-dev.txt
-├── test/                  # Tests
-│   ├── sql/              # C++ extension SQL tests
-│   └── python/           # Python CLI tests
-├── utils/                 # Utility scripts
-├── config/                # Configuration files
-├── examples/              # Usage examples
-├── docker/                # Docker configuration
-├── Makefile               # Build and run commands
-├── env.example           # Environment template
-└── README.md             # This file
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Snowflake     │    │   SnowDucks     │    │     DuckDB      │
+│                 │    │                 │    │                 │
+│ • Data Source   │◄──►│ • Query Cache   │◄──►│ • Fast Queries  │
+│ • Compute       │    │ • Parquet Files │    │ • Local Storage │
+│ • Scalability   │    │ • Metadata DB   │    │ • Extensions    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
 ## Quick Start
 
-### 1. Clone and Setup
+### 1. Setup
 
 ```bash
-# Clone the repository
-git clone <repository-url>
+# Clone and setup
+git clone https://github.com/your-username/snowducks.git
 cd snowducks
-
-# Complete setup (venv + install + build + config)
 make init
+
+# Configure your Snowflake credentials
+cp env.example .env
+# Edit .env with your Snowflake details
 ```
 
-### 2. Configure Snowflake
+### 2. Start PostgreSQL (Recommended)
 
 ```bash
-# Copy and configure environment
-cp env.example .env
-# Edit .env with your Snowflake credentials
+# Start PostgreSQL with Docker for metadata storage
+make postgres-start
 ```
 
 ### 3. Use SnowDucks
 
+**As a DuckDB Extension:**
+```sql
+-- Load the extension
+LOAD 'build/release/extension/snowducks/snowducks.duckdb_extension';
+
+-- Query Snowflake data (automatically cached)
+SELECT * FROM snowducks_query('SELECT * FROM my_table LIMIT 1000');
+```
+
+**As a Python CLI:**
 ```bash
-# Start Python CLI
+# Start the CLI
 make cli
 
-# Or start DuckDB with extension
-make duckdb
+# In the CLI
+snowducks> SELECT * FROM my_table LIMIT 1000;
 ```
+
+## Features
+
+### 🔄 Smart Caching
+- **Automatic Cache Detection**: Checks for existing cached data before querying Snowflake
+- **Hash-Based Naming**: Unique cache files based on query content and parameters
+- **Cache Invalidation**: Configurable TTL and force refresh options
+- **Parquet Format**: Efficient columnar storage for fast queries
+
+### 🛡️ Security & Authentication
+- **Multiple Auth Methods**: Password, key pair, and SSO authentication
+- **Environment Variables**: Secure credential management
+- **Role-Based Access**: Respects Snowflake roles and permissions
+
+### 🚀 Performance Optimizations
+- **Local DuckDB Engine**: Cached data queries at local speeds
+- **Columnar Storage**: Parquet format for efficient data access
+- **Metadata Database**: PostgreSQL for tracking cache state
+- **Connection Pooling**: Efficient Snowflake connection management
+
+### 🔧 Configuration Options
+- **Deployment Modes**: Local development or cloud deployment
+- **Storage Backends**: Local filesystem or S3 for cache storage
+- **Database Options**: PostgreSQL or local DuckDB for metadata
+- **Cost Controls**: Row limits and egress controls
 
 ## Configuration
 
 ### Environment Variables
 
-Create a `.env` file with your Snowflake credentials:
-
 ```bash
-# Required Snowflake settings
+# Required: Snowflake Configuration
 SNOWFLAKE_USER=your_username
+SNOWFLAKE_PASSWORD=your_password
 SNOWFLAKE_ACCOUNT=your_account
 SNOWFLAKE_DATABASE=your_database
 SNOWFLAKE_WAREHOUSE=your_warehouse
 SNOWFLAKE_ROLE=your_role
 
-# Authentication (choose one method)
-SNOWFLAKE_PASSWORD=your_password
-# OR
-# SNOWFLAKE_PRIVATE_KEY_PATH=/path/to/private_key.p8
-# SNOWFLAKE_PRIVATE_KEY_PASSPHRASE=your_passphrase
+# Optional: PostgreSQL for metadata (recommended)
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DATABASE=snowducks_metadata
+POSTGRES_USER=snowducks_user
+POSTGRES_PASSWORD=snowducks_password
 
-# Cache settings
+# Optional: S3 for cloud deployment
+S3_BUCKET=your-snowducks-bucket
+AWS_REGION=us-east-1
+
+# Optional: Cache configuration
 CACHE_MAX_AGE_HOURS=24
-CACHE_FORCE_REFRESH=false
 DEFAULT_ROW_LIMIT=1000
-
-# Cost control
-ALLOW_UNLIMITED_EGRESS=false
 ```
 
-## Usage
+### Deployment Modes
 
-### Python CLI
-
-The CLI provides an interactive DuckDB session with Snowflake connectivity via the `snowflake_query()` function.
-
+**Local Development:**
 ```bash
-# Start the CLI
-make cli
-
-# In the CLI, run:
-SELECT * FROM snowflake_query('SELECT * FROM your_table LIMIT 10', 1000, false);
-SELECT * FROM snowflake_query('STATS', 0, false);
-SELECT * FROM snowflake_query('SELECT * FROM your_table LIMIT 10', 1000, true);
+DEPLOYMENT_MODE=local
+DUCKLAKE_METADATA_PATH=~/.snowducks/metadata.ducklake
+DUCKLAKE_DATA_PATH=~/.snowducks/data
 ```
 
-### C++ Extension
-
-The C++ extension provides utility functions and can be loaded into any DuckDB instance.
-
+**Cloud Deployment:**
 ```bash
-# Start DuckDB with extension
-make duckdb
-
-# In DuckDB, run:
-LOAD 'snowducks.duckdb_extension';
-
--- Utility functions
-SELECT snowducks_info('Hello from C++!');
-SELECT snowducks_generate_cache_table_name('SELECT * FROM test LIMIT 10');
-SELECT snowducks_normalize_query_text('SELECT * FROM test LIMIT 10');
-SELECT snowducks_cache_stats();
+DEPLOYMENT_MODE=cloud
+S3_BUCKET=your-snowducks-bucket
+AWS_REGION=us-east-1
 ```
 
-## Building
+## Installation
 
 ### Prerequisites
 
-- Python 3.9+
-- C++17 compiler (for C++ extension)
-- CMake 3.16+
-- macOS or Linux
+- **DuckDB**: v1.3.1 or later
+- **Python**: 3.8 or later
+- **PostgreSQL**: For metadata storage (optional but recommended)
+- **Docker**: For PostgreSQL setup (optional)
 
-### Build Commands
+### Build from Source
 
 ```bash
 # Complete setup
 make init
 
-# Individual steps
-make venv      # Create Python virtual environment
-make install   # Install DuckDB CLI and dependencies
-make build     # Build C++ extension
-make config    # Validate configuration
-
-# Development
-make test      # Run all tests
-make test-cli  # Run Python tests only
-make test-ext  # Run C++ tests only
-make clean     # Clean build artifacts
-```
-
-## Architecture
-
-### Components
-
-1. **Python CLI** (`src/cli/`)
-   - Interactive DuckDB session
-   - Snowflake connectivity via ADBC
-   - Query caching logic
-   - `snowflake_query()` UDF
-
-2. **C++ Extension** (`src/`)
-   - Utility functions for query normalization
-   - Cache table name generation
-   - Consistent hashing with Python CLI
-   - `snowflake_query()` function with ADBC connectivity
-
-3. **Shared Utilities**
-   - Query normalization logic
-   - Hash generation for cache keys
-   - Cache table naming conventions
-
-### Cache Strategy
-
-- **Cache Key**: Normalized query hash (includes LIMIT clause)
-- **Storage**: DuckDB tables with hash-based naming
-- **TTL**: No automatic expiration (manual cleanup required)
-- **Consistency**: Same hashing between Python CLI and C++ extension
-
-## Development
-
-### Local Development
-
-```bash
-# Set up development environment
-make init
+# Build extension only
+make build
 
 # Run tests
 make test
-
-# Start development CLI
-make cli
 ```
 
-### Extension Development
+### Docker Setup
 
-The C++ extension is built using the DuckDB extension template. Key files:
+```bash
+# Start PostgreSQL with Docker
+make postgres-start
 
-- `src/snowducks_extension.cpp` - Main extension implementation
-- `src/include/snowducks_extension.hpp` - Extension header
-- `test/sql/` - SQL tests for the extension
+# Access pgAdmin at http://localhost:8080
+# Username: admin@snowducks.local
+# Password: admin
+```
 
-### Adding New Functions
+## Usage Examples
 
-To add new functions to the C++ extension:
+### Basic Query Caching
 
-1. Add function implementation in `src/snowducks_extension.cpp`
-2. Register the function in the `LoadInternal` function
-3. Add tests in `test/sql/`
+```sql
+-- First query: hits Snowflake, caches result
+SELECT * FROM snowducks_query('SELECT * FROM sales WHERE date >= ''2024-01-01''');
+
+-- Second query: uses cached data, instant response
+SELECT * FROM snowducks_query('SELECT * FROM sales WHERE date >= ''2024-01-01''');
+```
+
+### Complex Analytics
+
+```sql
+-- Complex query with aggregations
+SELECT 
+    region,
+    SUM(revenue) as total_revenue,
+    COUNT(*) as order_count
+FROM snowducks_query('
+    SELECT region, revenue, order_id 
+    FROM sales 
+    WHERE date >= ''2024-01-01''
+') 
+GROUP BY region 
+ORDER BY total_revenue DESC;
+```
+
+### Python Integration
+
+```python
+import duckdb
+
+# Connect and load extension
+con = duckdb.connect()
+con.execute("LOAD 'snowducks.duckdb_extension'")
+
+# Query with automatic caching
+result = con.execute("""
+    SELECT * FROM snowducks_query('
+        SELECT customer_id, revenue 
+        FROM sales 
+        WHERE region = ''North America''
+    ')
+""").fetchall()
+```
+
+## API Reference
+
+### DuckDB Extension Functions
+
+#### `snowducks_query(query_text)`
+Execute a Snowflake query with automatic caching.
+
+**Parameters:**
+- `query_text` (VARCHAR): SQL query to execute
+
+**Returns:** Table with query results
+
+**Example:**
+```sql
+SELECT * FROM snowducks_query('SELECT * FROM my_table LIMIT 100');
+```
+
+#### `snowducks_info(info_type)`
+Get information about the SnowDucks extension.
+
+**Parameters:**
+- `info_type` (VARCHAR): Type of info to retrieve ('extension', 'cache', 'config')
+
+**Returns:** Information about the specified type
+
+**Example:**
+```sql
+SELECT * FROM snowducks_info('cache');
+```
+
+### Python CLI Commands
+
+#### `query <sql>`
+Execute a Snowflake query with caching.
+
+```bash
+snowducks> query SELECT * FROM sales LIMIT 10;
+```
+
+#### `cache list`
+List all cached queries.
+
+```bash
+snowducks> cache list
+```
+
+#### `cache clear`
+Clear all cached data.
+
+```bash
+snowducks> cache clear
+```
+
+#### `config show`
+Show current configuration.
+
+```bash
+snowducks> config show
+```
+
+## Development
+
+### Project Structure
+
+```
+snowducks/
+├── src/
+│   ├── snowducks_extension.cpp    # C++ DuckDB extension
+│   ├── include/                   # C++ headers
+│   └── cli/                       # Python CLI
+│       ├── snowducks/             # Python package
+│       └── pyproject.toml         # Python build config
+├── test/                          # Test suites
+│   ├── python/                    # Python tests
+│   ├── cpp/                       # C++ tests
+│   └── sql/                       # SQL tests
+├── duckdb/                        # Vendored DuckDB
+├── extension-ci-tools/            # Build tools
+└── docs/                          # Documentation
+```
+
+### Building
+
+```bash
+# Build everything
+make build
+
+# Build extension only
+make build-extension
+
+# Build Python package
+make build-python
+```
+
+### Testing
+
+```bash
+# Run all tests
+make test
+
+# Run specific test suites
+make test-cli      # Python tests
+make test-ext      # C++ tests
+make test-sql      # SQL tests
+```
+
+### Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Run the test suite
+6. Submit a pull request
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **"Snowflake connection failed"**
-   - Check environment variables in `.env`
-   - Verify Snowflake credentials
-   - Ensure network connectivity
+**Extension won't load:**
+```bash
+# Check DuckDB version
+duckdb --version
 
-2. **"Extension not loaded"**
-   - Ensure extension is built: `make build`
-   - Check extension binary exists: `make info`
+# Ensure extension is built
+make build
+```
 
-3. **"Virtual environment not found"**
-   - Create virtual environment: `make venv`
-   - Or run complete setup: `make init`
+**PostgreSQL connection issues:**
+```bash
+# Check PostgreSQL status
+make postgres-status
 
-### Environment Variables
+# Restart PostgreSQL
+make postgres-stop
+make postgres-start
+```
 
-Required for Snowflake connectivity:
-- `SNOWFLAKE_USER`: Snowflake username
-- `SNOWFLAKE_PASSWORD`: Snowflake password
-- `SNOWFLAKE_ACCOUNT`: Snowflake account identifier
-- `SNOWFLAKE_WAREHOUSE`: Snowflake warehouse name
-- `SNOWFLAKE_DATABASE`: Snowflake database name
-- `SNOWFLAKE_SCHEMA`: Snowflake schema name
+**Cache not working:**
+```bash
+# Check cache directory permissions
+ls -la ~/.snowducks/
 
-## Contributing
+# Clear cache and retry
+snowducks> cache clear
+```
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+### Debug Mode
+
+Enable debug logging:
+
+```bash
+# Set debug environment variable
+export SNOWDUCKS_DEBUG=true
+
+# Run with debug output
+make cli
+```
+
+## Future Development Ideas
+
+Based on DuckLake's capabilities and community feedback opportunities, here are potential enhancements for future versions:
+
+### 🗄️ Additional Storage Backends
+- **Google Cloud Storage**: Native GCS support for cache storage
+- **Azure Blob Storage**: Azure integration for enterprise deployments
+- **MinIO/S3-Compatible**: Support for on-premises S3-compatible storage
+- **Local Network Storage**: NFS/SMB support for shared cache directories
+
+### 🗃️ Database Backend Options
+- **MySQL/MariaDB**: Alternative metadata database backend
+- **SQLite**: Lightweight metadata storage for embedded deployments
+- **MongoDB**: Document-based metadata storage
+- **Redis**: In-memory metadata for high-performance scenarios
+
+### 🔄 Advanced Caching Features
+- **Incremental Caching**: Cache only new/changed data
+- **Partitioned Caching**: Cache by date ranges or other partitions
+- **Compression Options**: Configurable compression for cache files
+- **Cache Warming**: Pre-populate cache with frequently used queries
+- **Distributed Caching**: Share cache across multiple instances
+
+### 🔐 Enhanced Security
+- **Encryption at Rest**: Encrypt cached Parquet files
+- **Vault Integration**: HashiCorp Vault for credential management
+- **OAuth2 Support**: Modern authentication flows
+- **Audit Logging**: Track all cache operations and queries
+
+### 📊 Monitoring & Observability
+- **Metrics Export**: Prometheus metrics for monitoring
+- **Query Performance Analytics**: Track query performance over time
+- **Cache Hit Rate Monitoring**: Monitor cache effectiveness
+- **Cost Tracking**: Track Snowflake compute costs
+
+### 🚀 Performance Optimizations
+- **Parallel Query Execution**: Execute multiple queries concurrently
+- **Query Result Streaming**: Stream large results without full materialization
+- **Smart Query Routing**: Route queries to optimal backend
+- **Connection Pooling**: Advanced connection management
+
+### 🔧 Configuration Enhancements
+- **Dynamic Configuration**: Runtime configuration changes
+- **Configuration Validation**: Validate config at startup
+- **Configuration Templates**: Pre-built configs for common scenarios
+- **Environment-Specific Configs**: Dev/staging/prod configurations
+
+### 🌐 Integration Features
+- **Jupyter Integration**: Native Jupyter notebook support
+- **dbt Integration**: Work with dbt models and transformations
+- **Airflow Integration**: Apache Airflow operators
+- **Kubernetes**: Native K8s deployment support
+
+### 📈 Enterprise Features
+- **Multi-Tenant Support**: Isolated caching per tenant
+- **RBAC Integration**: Role-based access control
+- **Compliance Features**: GDPR, SOX compliance tools
+- **Backup & Recovery**: Automated cache backup strategies
+
+### 🎯 Community-Driven Features
+- **Plugin System**: Extensible architecture for custom features
+- **Query Templates**: Pre-built query templates for common use cases
+- **Community Cache Sharing**: Share cache definitions across teams
+- **Query Optimization Hints**: AI-powered query optimization suggestions
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-**Note**: This project includes DuckDB as a vendored dependency. DuckDB is licensed under the MIT License and is copyright 2018-2025 Stichting DuckDB Foundation.
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+## Support
+
+- **Documentation**: [docs.snowducks.dev](https://docs.snowducks.dev)
+- **Issues**: [GitHub Issues](https://github.com/your-username/snowducks/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/your-username/snowducks/discussions)
+- **Discord**: [Join our community](https://discord.gg/snowducks)
+
+## Acknowledgments
+
+- **DuckDB Team**: For the excellent database engine and extension framework
+- **DuckLake Contributors**: For the metadata management system
+- **Snowflake**: For the powerful cloud data platform
+- **Open Source Community**: For the amazing tools and libraries that make this possible
+
+---
+
+**Made with ❤️ by the SnowDucks community**
