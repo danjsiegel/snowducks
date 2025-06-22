@@ -1,39 +1,147 @@
 #
 # This workflow calls the main distribution pipeline from DuckDB to build, test and (optionally) release the extension
 #
-name: Main Extension Distribution Pipeline
+name: SnowDucks CI/CD Pipeline
+
 on:
   push:
+    branches: [ main, develop ]
   pull_request:
-  workflow_dispatch:
+    branches: [ main ]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' && github.sha || '' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  duckdb-next-build:
-    name: Build extension binaries
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
-    if: false   # extension-template is currently not compatible with main
-    with:
-      duckdb_version: main
-      ci_tools_version: main
-      extension_name: snowducks
+  setup-and-test:
+    name: Setup and Test
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: snowducks_metadata
+          POSTGRES_USER: snowducks_user
+          POSTGRES_PASSWORD: snowducks_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
 
-  duckdb-stable-build:
-    name: Build extension binaries
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.3.1
-    with:
-      duckdb_version: v1.3.1
-      ci_tools_version: v1.3.1
-      extension_name: snowducks
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
 
-  code-quality-check:
-    name: Code Quality Check
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@main
-    with:
-      duckdb_version: v1.3.1
-      ci_tools_version: main
-      extension_name: snowducks
-      format_checks: 'format;tidy'
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake git
+
+    - name: Setup environment
+      run: |
+        # Create .env file for testing
+        cp env.example .env
+        # Set test environment variables
+        echo "SNOWFLAKE_USER=test_user" >> .env
+        echo "SNOWFLAKE_PASSWORD=test_password" >> .env
+        echo "SNOWFLAKE_ACCOUNT=test_account" >> .env
+        echo "SNOWFLAKE_DATABASE=test_database" >> .env
+        echo "SNOWFLAKE_WAREHOUSE=test_warehouse" >> .env
+        echo "SNOWFLAKE_ROLE=test_role" >> .env
+        echo "POSTGRES_HOST=localhost" >> .env
+        echo "POSTGRES_PORT=5432" >> .env
+        echo "POSTGRES_DATABASE=snowducks_metadata" >> .env
+        echo "POSTGRES_USER=snowducks_user" >> .env
+        echo "POSTGRES_PASSWORD=snowducks_password" >> .env
+
+    - name: Complete setup
+      run: make init
+
+    - name: Run all tests
+      run: make test
+
+    - name: Test PostgreSQL integration
+      run: |
+        # Test PostgreSQL connection
+        python3 utils/test_postgresql_setup.py
+
+    - name: Build extension
+      run: make build
+
+    - name: Test extension loading
+      run: |
+        # Test that extension can be loaded
+        ./build/release/duckdb -c "LOAD 'build/release/extension/snowducks/snowducks.duckdb_extension'; SELECT snowducks_info('extension') as status;"
+
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install black flake8 mypy
+
+    - name: Check Python formatting
+      run: |
+        black --check src/cli/
+        black --check test/python/
+
+    - name: Check Python linting
+      run: |
+        flake8 src/cli/ --max-line-length=88 --extend-ignore=E203,W503
+        flake8 test/python/ --max-line-length=88 --extend-ignore=E203,W503
+
+    - name: Check Python types
+      run: |
+        mypy src/cli/ --ignore-missing-imports
+
+  build-extension:
+    name: Build Extension
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake git
+
+    - name: Build extension
+      run: make build
+
+    - name: Upload extension artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: snowducks-extension
+        path: build/release/extension/snowducks/snowducks.duckdb_extension
