@@ -129,7 +129,7 @@ ui:
 		exit 1; \
 	fi
 	@echo "🚀 Starting DuckDB with UI extension and SnowDucks extension..."
-	@./build/release/duckdb -cmd "LOAD 'build/release/extension/snowducks/snowducks.duckdb_extension'; SELECT snowducks_info('extension') as status; INSTALL ducklake; LOAD ducklake; ATTACH 'ducklake:postgres:host=localhost port=5432 dbname=snowducks_metadata user=snowducks_user password=snowducks_password' AS metadata (DATA_PATH '~/.snowducks/data'); INSTALL ui; LOAD ui; CALL start_ui();" -ui
+	@./build/release/duckdb -cmd "LOAD 'build/release/extension/snowducks/snowducks.duckdb_extension'; SELECT snowducks_info('extension') as status; INSTALL ducklake; LOAD ducklake; ATTACH 'ducklake:postgres:host=$${PG_HOST:-localhost} port=$${PG_PORT:-5432} dbname=$${PG_DB:-snowducks_metadata} user=$${PG_USER:-snowducks_user} password=$${PG_PASS:-snowducks_password}' AS metadata (DATA_PATH '$${DUCKLAKE_DATA_PATH:-~/.snowducks/data}'); INSTALL ui; LOAD ui; CALL start_ui();" -ui
 
 # Start DuckDB with extension loaded
 .PHONY: duckdb

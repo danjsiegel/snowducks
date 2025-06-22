@@ -230,11 +230,27 @@ private:
 			// Get connection parameters from environment
 			const char* data_path_env = std::getenv("DUCKLAKE_DATA_PATH");
 			string data_path = data_path_env ? string(data_path_env) : string(std::getenv("HOME")) + "/.snowducks/data";
-			const char* pg_host = std::getenv("PG_HOST") ? std::getenv("PG_HOST") : "localhost";
-			const char* pg_port = std::getenv("PG_PORT") ? std::getenv("PG_PORT") : "5432";
-			const char* pg_db = std::getenv("PG_DB") ? std::getenv("PG_DB") : "snowducks_metadata";
-			const char* pg_user = std::getenv("PG_USER") ? std::getenv("PG_USER") : "snowducks_user";
-			const char* pg_pass = std::getenv("PG_PASS") ? std::getenv("PG_PASS") : "snowducks_password";
+			
+			// Get PostgreSQL connection parameters - require environment variables
+			const char* pg_host = std::getenv("PG_HOST");
+			const char* pg_port = std::getenv("PG_PORT");
+			const char* pg_db = std::getenv("PG_DB");
+			const char* pg_user = std::getenv("PG_USER");
+			const char* pg_pass = std::getenv("PG_PASS");
+			
+			// Check if all required PostgreSQL environment variables are set
+			if (!pg_host || !pg_port || !pg_db || !pg_user || !pg_pass) {
+				if (result->debug) {
+					std::cout << "DEBUG: Missing PostgreSQL environment variables. Required: PG_HOST, PG_PORT, PG_DB, PG_USER, PG_PASS" << std::endl;
+				}
+				// Return a simple schema for error messages
+				names.push_back("error");
+				return_types.push_back(LogicalType::VARCHAR);
+				result->fetch_error = "Missing PostgreSQL environment variables. Required: PG_HOST, PG_PORT, PG_DB, PG_USER, PG_PASS";
+				result->column_names = names;
+				result->column_types = return_types;
+				return std::move(result);
+			}
 
 			string attach_sql = "ATTACH 'ducklake:postgres:host=" + string(pg_host) +
 								" port=" + string(pg_port) +
@@ -558,9 +574,45 @@ private:
 						std::cout << "DEBUG: Output: " << cli_result << std::endl;
 					}
 					
+					// Extract error message from Python CLI output
+					string error_message = "Failed to fetch data from Snowflake";
+					
+					// Look for common error patterns in the output
+					if (cli_result.find("Error:") != string::npos) {
+						// Extract the line starting with "Error:"
+						size_t error_pos = cli_result.find("Error:");
+						size_t newline_pos = cli_result.find('\n', error_pos);
+						if (newline_pos != string::npos) {
+							error_message = cli_result.substr(error_pos, newline_pos - error_pos);
+						} else {
+							error_message = cli_result.substr(error_pos);
+						}
+					} else if (cli_result.find("NOT_FOUND:") != string::npos) {
+						// Extract Snowflake error messages
+						size_t error_pos = cli_result.find("NOT_FOUND:");
+						size_t newline_pos = cli_result.find('\n', error_pos);
+						if (newline_pos != string::npos) {
+							error_message = cli_result.substr(error_pos, newline_pos - error_pos);
+						} else {
+							error_message = cli_result.substr(error_pos);
+						}
+					} else if (cli_result.find("SQL compilation error:") != string::npos) {
+						// Extract SQL compilation errors
+						size_t error_pos = cli_result.find("SQL compilation error:");
+						size_t newline_pos = cli_result.find('\n', error_pos);
+						if (newline_pos != string::npos) {
+							error_message = cli_result.substr(error_pos, newline_pos - error_pos);
+						} else {
+							error_message = cli_result.substr(error_pos);
+						}
+					} else if (!bind_data.fetch_error.empty()) {
+						// Use stored fetch error if available
+						error_message = bind_data.fetch_error;
+					}
+					
 					// Return error message
 					output.SetCardinality(1);
-					output.data[0].SetValue(0, Value(bind_data.fetch_error.empty() ? "Failed to fetch data from Snowflake" : bind_data.fetch_error));
+					output.data[0].SetValue(0, Value(error_message));
 					global_state.finished = true;
 					return;
 				}
