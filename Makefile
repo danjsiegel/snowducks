@@ -30,9 +30,10 @@ help:
 	@echo "  make postgres-test   - Test PostgreSQL setup"
 	@echo ""
 	@echo "Development:"
-	@echo "  make test      - Run all tests (CLI and extension)"
+	@echo "  make test      - Run all tests (Python, C++, SQL)"
 	@echo "  make test-cli  - Run Python CLI tests only"
 	@echo "  make test-ext  - Run C++ extension tests only"
+	@echo "  make test-sql  - Run SQLLogicTests only"
 	@echo "  make clean     - Clean all build artifacts"
 	@echo ""
 	@echo "Usage:"
@@ -141,28 +142,6 @@ duckdb:
 	fi
 	@./build/release/duckdb
 
-# Run all tests
-.PHONY: test
-test:
-	$(MAKE) test-cli
-	$(MAKE) test-ext
-
-# Test Python CLI
-.PHONY: test-cli
-test-cli:
-	@echo "🦆 Running Python CLI tests..."
-	@if [ ! -d "venv" ]; then \
-		echo "❌ Virtual environment not found. Run 'make venv' first."; \
-		exit 1; \
-	fi
-	@cd test/python && ../../venv/bin/pytest . -v
-
-# Test C++ extension
-.PHONY: test-ext
-test-ext:
-	@echo "🦆 Running C++ extension tests..."
-	@./build/release/test/unittest test/sql/*
-
 # Clean all build artifacts
 .PHONY: clean
 clean:
@@ -252,3 +231,30 @@ postgres-shell:
 postgres-test:
 	@echo "🧪 Testing PostgreSQL setup..."
 	@python3 utils/test_postgresql_setup.py
+
+# Test targets - defined after include to override any conflicting targets
+# Run all tests
+.PHONY: test
+test: test-cli test-ext test-sql
+
+# Test Python CLI
+.PHONY: test-cli
+test-cli:
+	@echo "🦆 Running Python CLI tests..."
+	@if [ ! -d "venv" ]; then \
+		echo "❌ Virtual environment not found. Run 'make venv' first."; \
+		exit 1; \
+	fi
+	@venv/bin/pytest test/python -v
+
+# Test C++ extension
+.PHONY: test-ext
+test-ext:
+	@echo "🦆 Running C++ extension tests..."
+	@cd test/cpp && cmake . && make && ./snowducks_tests
+
+# Test SQLLogicTests
+.PHONY: test-sql
+test-sql:
+	@echo "🦆 Running SQLLogicTests..."
+	@./build/release/test/unittest test/sql/snowducks.test

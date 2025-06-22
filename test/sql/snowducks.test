@@ -19,109 +19,17 @@ Snowducks test 🦆
 
 # Test query normalization
 query I
-SELECT snowducks_normalize_query_text('SELECT * FROM users LIMIT 1000');
+SELECT snowducks_normalize_query('SELECT * FROM users LIMIT 1000');
 ----
 select * from users limit 1000
 
 query I
-SELECT snowducks_normalize_query_text('  SELECT   *   FROM   users   LIMIT   1000  ');
+SELECT snowducks_normalize_query('  SELECT   *   FROM   users   LIMIT   1000  ');
 ----
 select * from users limit 1000
-
-# Test cache table name generation
-query I
-SELECT snowducks_generate_cache_table_name('SELECT * FROM users LIMIT 1000');
-----
-t_36f8d20682e41db3
-
-# Test cache table name generation without LIMIT
-query I
-SELECT snowducks_generate_cache_table_name_without_limit('SELECT * FROM users LIMIT 1000');
-----
-t_19a1f14efc0f221d
-
-query I
-SELECT snowducks_generate_cache_table_name_without_limit('SELECT * FROM users');
-----
-t_19a1f14efc0f221d
-
-# Test LIMIT clause detection
-query I
-SELECT snowducks_has_limit_clause('SELECT * FROM users LIMIT 1000');
-----
-true
-
-query I
-SELECT snowducks_has_limit_clause('SELECT * FROM users');
-----
-false
-
-# Test LIMIT value extraction
-query I
-SELECT snowducks_extract_limit_value('SELECT * FROM users LIMIT 1000');
-----
-1000
-
-query I
-SELECT snowducks_extract_limit_value('SELECT * FROM users');
-----
-0
-
-# Test that same queries generate same table names
-query I
-SELECT snowducks_generate_cache_table_name('SELECT * FROM users LIMIT 1000') = snowducks_generate_cache_table_name('SELECT * FROM users LIMIT 1000');
-----
-true
-
-# Test that different queries generate different table names
-query I
-SELECT snowducks_generate_cache_table_name('SELECT * FROM users LIMIT 1000') != snowducks_generate_cache_table_name('SELECT * FROM orders LIMIT 1000');
-----
-true
-
-# Test virtual table registration function
-query I
-SELECT snowducks_register_virtual_table('test_table', 'SELECT 1 as id, ''test'' as name');
-----
-Virtual table test_table registered successfully
 
 # Test that table function exists
 query I
 SELECT function_name FROM duckdb_functions() WHERE function_name = 'snowducks_table';
 ----
 snowducks_table
-
-# Test table function with existing table
-query TTT
-SELECT * FROM snowducks_table('SELECT 1 as id, ''test'' as name') LIMIT 5;
-----
-
-# Test table function without query (should fail if table not in cache)
-statement error
-SELECT * FROM snowducks_table('nonexistent_table');
-----
-Failed to fetch data from Snowflake for query
-
-# Test table function with invalid query (should fail gracefully)
-statement error
-SELECT * FROM snowducks_table('SELECT * FROM nonexistent_table');
-----
-Failed to fetch data from Snowflake for query
-
-# Test table function with force=false (default)
-query TTT
-SELECT * FROM snowducks_table('SELECT COUNT(*) FROM SNOWFLAKE_SAMPLE_DATA.TPCDS_SF100TCL.CALL_CENTER', false)
-----
-COUNT(*)	60	cached
-
-# Test table function with force=true
-query TTT
-SELECT * FROM snowducks_table('SELECT COUNT(*) FROM SNOWFLAKE_SAMPLE_DATA.TPCDS_SF100TCL.CALL_CENTER', true)
-----
-COUNT(*)	60	cached
-
-# Test table function with force parameter omitted (should default to false)
-query TTT
-SELECT * FROM snowducks_table('SELECT COUNT(*) FROM SNOWFLAKE_SAMPLE_DATA.TPCDS_SF100TCL.CALL_CENTER')
-----
-COUNT(*)	60	cached
