@@ -516,7 +516,7 @@ class DuckLakeManager:
                 pass  # Ignore errors when closing file
         
         self.lock_fd = None
-        self.lock_file = None
+        self.lock_file = None 
     
     def get_table_schema(self, table_name: str) -> List[Dict[str, str]]:
         """Get schema information for a table as a list of column definitions."""

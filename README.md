@@ -11,6 +11,17 @@ SnowDucks provides a unified interface for querying Snowflake data with automati
 - **🔗 Seamless Integration**: Works as both a DuckDB extension and Python CLI
 - **⚡ Performance**: Local DuckDB performance for cached data
 - **🔄 Automatic Sync**: Fresh data from Snowflake when cache is stale
+- **🎯 Guaranteed Data Availability**: Ensures data is fetched and cached before query execution
+
+## Key Features
+
+### 🎯 Guaranteed Order of Operations
+SnowDucks ensures the correct order of operations:
+1. **Bind Phase**: Check cache, fetch from Snowflake if needed, register table
+2. **Schema Determination**: Determine table schema after data is available
+3. **Execution Phase**: Execute queries against cached data
+
+This guarantees that queries always have the right data available before execution begins.
 
 ## Architecture
 
@@ -59,11 +70,31 @@ SELECT * FROM snowducks_query('SELECT * FROM my_table LIMIT 1000');
 
 **As a Python CLI:**
 ```bash
-# Start the CLI
+# Start the interactive DuckDB session
 make cli
 
-# In the CLI
-snowducks> SELECT * FROM my_table LIMIT 1000;
+SELECT * FROM snowflake_query('SELECT * FROM my_table LIMIT 1000');
+```
+
+**Direct CLI Usage:**
+```bash
+# Run the CLI directly
+./src/cli/snowducksi
+
+# Or use Python module
+python -m snowducks.cli
+
+# Test connection
+python -m snowducks.cli test
+
+# Show cache stats
+python -m snowducks.cli stats
+
+# Clear cache
+python -m snowducks.cli clear-cache
+
+# Execute a single query
+python -m snowducks.cli query --query "SELECT * FROM my_table LIMIT 100"
 ```
 
 ## Features
@@ -73,6 +104,7 @@ snowducks> SELECT * FROM my_table LIMIT 1000;
 - **Hash-Based Naming**: Unique cache files based on query content and parameters
 - **Cache Invalidation**: Configurable TTL and force refresh options
 - **Parquet Format**: Efficient columnar storage for fast queries
+- **Guaranteed Data Availability**: Data is fetched and cached before query execution
 
 ### 🛡️ Security & Authentication
 - **Multiple Auth Methods**: Password, key pair, and SSO authentication
@@ -84,6 +116,7 @@ snowducks> SELECT * FROM my_table LIMIT 1000;
 - **Columnar Storage**: Parquet format for efficient data access
 - **Metadata Database**: PostgreSQL for tracking cache state
 - **Connection Pooling**: Efficient Snowflake connection management
+- **Optimized Execution Flow**: Bind phase ensures data availability before execution
 
 ### 🔧 Configuration Options
 - **Deployment Modes**: Local development or cloud deployment
@@ -288,6 +321,7 @@ snowducks/
 │   ├── include/                   # C++ headers
 │   └── cli/                       # Python CLI
 │       ├── snowducks/             # Python package
+│       ├── snowducksi             # CLI entry point
 │       └── pyproject.toml         # Python build config
 ├── test/                          # Test suites
 │   ├── python/                    # Python tests
@@ -375,6 +409,21 @@ export SNOWDUCKS_DEBUG=true
 # Run with debug output
 make cli
 ```
+
+## Technical Details
+
+### Order of Operations
+
+SnowDucks implements a carefully designed order of operations to ensure data availability:
+
+**Bind Phase**: 
+- Check if cached data exists
+    - If cached: Get schema from the cached table
+- If NOT cached: Get schema from query parsing (via Python CLI) 
+
+**Execution Phase**: 
+- If table is NOT cached: Fetch data from Snowflake and cache it
+- Execute queries against the cached table
 
 ## Future Development Ideas
 

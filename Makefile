@@ -115,7 +115,7 @@ cli:
 		echo "❌ Virtual environment not found. Run 'make init' first."; \
 		exit 1; \
 	fi
-	@cd src/cli && ../../venv/bin/python -m snowducks.cli
+	@venv/bin/python src/cli/snowducksi start-duckdb
 
 # Start SnowDucks UI with C++ extension
 .PHONY: ui

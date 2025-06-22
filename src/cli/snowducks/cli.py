@@ -12,7 +12,8 @@ from .core import (
     test_connection,
     get_cache_stats,
     clear_cache,
-    register_snowflake_udf
+    register_snowflake_udf,
+    snowflake_query
 )
 from .config import SnowDucksConfig
 from .utils import generate_normalized_query_hash
@@ -22,44 +23,60 @@ def main():
     """Main CLI entry point."""
     if len(sys.argv) < 2:
         _print_help()
-        return
+        return 1
 
     command = sys.argv[1].lower()
 
+    # Handle help commands
+    if command in ["--help", "-h", "help"]:
+        _print_help()
+        return 0
+
     if command == "configure":
-        _handle_configure()
+        return _handle_configure()
     elif command == "test":
-        _handle_test()
+        return _handle_test()
     elif command == "stats":
-        _handle_stats()
+        return _handle_stats()
     elif command == "clear-cache":
-        _handle_clear_cache()
+        return _handle_clear_cache()
     elif command == "start-duckdb":
-        _handle_start_duckdb()
+        return _handle_start_duckdb()
     elif command == "query":
-        _handle_query()
+        return _handle_query()
     elif command == "get-schema":
-        _handle_get_schema()
+        return _handle_get_schema()
     else:
         print(f"❌ Unknown command: {command}")
         _print_help()
+        return 1
 
 
 def _handle_configure():
     """Handle configure command."""
     print("🔧 Configuring SnowDucks...")
-    configure()
-    print("✅ Configuration complete!")
+    try:
+        configure()
+        print("✅ Configuration complete!")
+        return 0
+    except Exception as e:
+        print(f"❌ Configuration failed: {e}")
+        return 1
 
 
 def _handle_test():
     """Handle test command."""
     print("🔌 Testing Snowflake connection...")
-    if test_connection():
-        print("✅ Connection successful!")
-    else:
-        print("❌ Connection failed!")
-        sys.exit(1)
+    try:
+        if test_connection():
+            print("✅ Connection successful!")
+            return 0
+        else:
+            print("❌ Connection failed!")
+            return 1
+    except Exception as e:
+        print(f"❌ Connection test failed: {e}")
+        return 1
 
 
 def _handle_stats():
@@ -72,18 +89,22 @@ def _handle_stats():
         print(f"  Cache Max Age: {stats['cache_max_age_hours']} hours")
         print(f"  Metadata Path: {stats['ducklake_metadata_path']}")
         print(f"  Data Path: {stats['ducklake_data_path']}")
+        return 0
     except Exception as e:
         print(f"❌ Error getting stats: {e}")
+        return 1
 
 
 def _handle_clear_cache():
     """Handle clear-cache command."""
     print("🗑️  Clearing SnowDucks cache...")
     try:
-        clear_cache()
-        print("✅ Cache cleared successfully!")
+        cleared_count = clear_cache()
+        print(f"✅ Cache cleared successfully! Removed {cleared_count} entries.")
+        return 0
     except Exception as e:
         print(f"❌ Error clearing cache: {e}")
+        return 1
 
 
 def _handle_start_duckdb():
@@ -120,10 +141,13 @@ def _handle_start_duckdb():
     try:
         # Start the interactive script
         subprocess.run([sys.executable, str(script_path)], check=True)
+        return 0
     except KeyboardInterrupt:
         print("\n👋 Goodbye!")
+        return 0
     except Exception as e:
         print(f"❌ Error starting DuckDB: {e}")
+        return 1
 
 
 def _handle_query():
@@ -138,12 +162,12 @@ def _handle_query():
     parser.add_argument('--schema-only', action='store_true', help='Return only schema information as JSON')
     
     # Parse arguments from sys.argv[2:] to skip the 'query' command
-    args = parser.parse_args(sys.argv[2:])
+    try:
+        args = parser.parse_args(sys.argv[2:])
+    except SystemExit:
+        return 1
     
     try:
-        # Import here to avoid circular imports
-        from .core import snowflake_query
-        
         force_refresh = args.force_refresh
         if args.no_force_refresh:
             force_refresh = False
@@ -183,6 +207,8 @@ def _handle_query():
             print(f"Cache table: {table_name}")
             print(f"Status: {status}")
         
+        return 0
+        
     except Exception as e:
         if args.schema_only:
             import json
@@ -193,7 +219,7 @@ def _handle_query():
             print(json.dumps(result))
         else:
             print(f"Error: {e}")
-            sys.exit(1)
+        return 1
 
 
 def _handle_get_schema():
@@ -201,7 +227,7 @@ def _handle_get_schema():
     if len(sys.argv) < 4:
         print("❌ Error: Table name and original query required")
         print("Usage: snowducksi get-schema <table_name> <original_query>")
-        sys.exit(1)
+        return 1
     
     table_name = sys.argv[2]
     original_query = sys.argv[3]
@@ -218,12 +244,14 @@ def _handle_get_schema():
             "schema": schema
         }
         print(json.dumps(result))
+        return 0
     except Exception as e:
         result = {
             "status": "error",
             "error": str(e)
         }
         print(json.dumps(result))
+        return 1
 
 
 def _print_help():
@@ -253,4 +281,4 @@ def _print_help():
 
 
 if __name__ == "__main__":
-    main() 
+    sys.exit(main()) 

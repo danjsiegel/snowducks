@@ -5,9 +5,6 @@ project(snowducks_tests)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Find DuckDB
-find_package(DuckDB REQUIRED)
-
 # Find Catch2 for testing
 find_package(Catch2 3 REQUIRED)
 
@@ -18,6 +15,12 @@ include_directories(${CMAKE_SOURCE_DIR}/duckdb/src/include)
 # Add DuckDB as a subdirectory (vendored)
 add_subdirectory(${CMAKE_SOURCE_DIR}/../../duckdb duckdb_build)
 
+# Add the main build directory where the extension is built
+link_directories(${CMAKE_SOURCE_DIR}/../../build/release)
+
+# Add the snowducks extension build directory to the linker search path
+link_directories(${CMAKE_SOURCE_DIR}/../../build/release/extension/snowducks)
+
 # Create test executable
 add_executable(snowducks_tests
     test_snowducks_extension.cpp
@@ -26,7 +29,7 @@ add_executable(snowducks_tests
 # Link libraries
 target_link_libraries(snowducks_tests
     duckdb_static
-    Catch2::Catch2
+    Catch2::Catch2WithMain
     snowducks_extension
 )
 

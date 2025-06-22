@@ -5,17 +5,28 @@ SnowDucks CLI - Instant SQL for Snowflake with DuckLake Caching
 
 import sys
 import os
+from pathlib import Path
 
-# Use the virtual environment Python if available (venv is in current directory)
-venv_python = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'venv', 'bin', 'python')
-if os.path.exists(venv_python):
-    # Replace the current process with the venv Python
-    os.execv(venv_python, [venv_python] + sys.argv)
+# Get the directory where this script is located
+script_dir = Path(__file__).parent.absolute()
 
-# Add the cli directory to the Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add the cli directory to the Python path so we can import snowducks
+sys.path.insert(0, str(script_dir))
 
-from snowducks.cli import main
+# Try to use virtual environment if it exists
+venv_python = script_dir / "venv" / "bin" / "python"
+if venv_python.exists():
+    # If we're not already using the venv Python, restart with it
+    if not sys.executable.startswith(str(venv_python)):
+        os.execv(str(venv_python), [str(venv_python)] + sys.argv)
+
+try:
+    from snowducks.cli import main
+except ImportError as e:
+    print(f"❌ Error importing SnowDucks CLI: {e}")
+    print(f"Current Python path: {sys.path}")
+    print(f"Script directory: {script_dir}")
+    sys.exit(1)
 
 if __name__ == "__main__":
-    main() 
+    sys.exit(main()) 
