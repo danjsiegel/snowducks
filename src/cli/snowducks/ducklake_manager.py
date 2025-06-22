@@ -291,14 +291,18 @@ class DuckLakeManager:
             
             # Delete existing cache metadata and insert new one
             self.duckdb_connection.execute(f"DELETE FROM {schema_name}.snowducks_cache_metadata WHERE query_hash = ?", [query_hash])
+            
+            # Calculate expiration time based on cache_max_age_hours
+            expires_at = now + timedelta(hours=self.config.cache_max_age_hours) if self.config.cache_max_age_hours > 0 else None
+            
             self.duckdb_connection.execute(f"""
                 INSERT INTO {schema_name}.snowducks_cache_metadata
                 (query_hash, table_name, file_count, total_size_bytes, 
-                 row_count, created_at, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                 row_count, created_at, expires_at, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 query_hash, fq_table_name, file_info[0], total_size, 
-                row_count, now, user_id
+                row_count, now, expires_at, user_id
             ])
             
             # Update user stats
