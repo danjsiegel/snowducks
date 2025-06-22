@@ -97,6 +97,18 @@ python -m snowducks.cli clear-cache
 python -m snowducks.cli query --query "SELECT * FROM my_table LIMIT 100"
 ```
 
+**With DuckDB UI (Recommended for Development):**
+```bash
+# Start DuckDB with web UI and SnowDucks extension
+make ui
+
+# This opens DuckDB with:
+# - SnowDucks extension loaded
+# - DuckLake extension for metadata
+# - Web UI for interactive querying
+# - All extensions pre-configured
+```
+
 ## Features
 
 ### 🔄 Smart Caching
