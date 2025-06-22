@@ -99,3 +99,9 @@ ducklake_*.db
 *.parquet
 *.arrow
 duckdb_unittest_tempdir/
+
+# Debug and temporary files
+untitled*
+Untitled*
+debug_*.log
+*.debug
