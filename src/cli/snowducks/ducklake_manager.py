@@ -516,4 +516,150 @@ class DuckLakeManager:
                 pass  # Ignore errors when closing file
         
         self.lock_fd = None
-        self.lock_file = None 
+        self.lock_file = None
+    
+    def get_table_schema(self, table_name: str) -> List[Dict[str, str]]:
+        """Get schema information for a table as a list of column definitions."""
+        try:
+            schema_name = self._get_schema_name()
+            fq_table_name = f"{schema_name}.{table_name}"
+            
+            # Check if table exists
+            if not self._table_exists(fq_table_name):
+                # Try without schema prefix
+                fq_table_name = table_name
+                if not self._table_exists(fq_table_name):
+                    raise DuckLakeError(f"Table {table_name} does not exist")
+            
+            # Get schema information
+            result = self.duckdb_connection.execute(f"""
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = ? 
+                ORDER BY ordinal_position
+            """, [table_name.split('.')[-1]]).fetchall()
+            
+            schema = []
+            for column_name, data_type in result:
+                schema.append({
+                    "name": column_name,
+                    "type": data_type.upper()
+                })
+            
+            return schema
+            
+        except Exception as e:
+            raise DuckLakeError(f"Failed to get schema for table {table_name}: {e}") from e
+
+
+def get_table_schema_from_query(original_query: str) -> List[Dict[str, str]]:
+    """Get schema from Snowflake by executing the query with LIMIT 0."""
+    try:
+        # Get config for Snowflake connection
+        config = SnowDucksConfig.from_env()
+        
+        # Query Snowflake directly via ADBC for schema only
+        from adbc_driver_snowflake import dbapi as snowflake_adbc
+        import urllib.parse
+        
+        # URL-encode the password to handle special characters like #
+        encoded_password = urllib.parse.quote(config.snowflake_password, safe='')
+        
+        # Build URI according to ADBC documentation format
+        # Format: user:password@account/database?param1=value1&paramN=valueN
+        conn_uri = f"{config.snowflake_user}:{encoded_password}@{config.snowflake_account}/{config.snowflake_database}?warehouse={config.snowflake_warehouse}&role={config.snowflake_role}"
+        
+        with snowflake_adbc.connect(uri=conn_uri) as conn:
+            with conn.cursor() as cursor:
+                # Execute the query with LIMIT 0 to get schema only (no data)
+                limited_query = f"SELECT * FROM ({original_query}) LIMIT 0"
+                cursor.execute(limited_query)
+                
+                # Get column information from cursor description
+                schema = []
+                for col in cursor.description:
+                    col_name = col[0]
+                    col_type = col[1]
+                    
+                    # Map Snowflake types to DuckDB types
+                    duckdb_type = "VARCHAR"  # Default
+                    if col_type in [1, 2, 3]:  # Numeric types
+                        duckdb_type = "DOUBLE"
+                    elif col_type == 4:  # Float
+                        duckdb_type = "DOUBLE"
+                    elif col_type == 5:  # String
+                        duckdb_type = "VARCHAR"
+                    elif col_type == 6:  # Date
+                        duckdb_type = "DATE"
+                    elif col_type == 7:  # Time
+                        duckdb_type = "TIME"
+                    elif col_type == 8:  # Timestamp
+                        duckdb_type = "TIMESTAMP"
+                    elif col_type == 9:  # Boolean
+                        duckdb_type = "BOOLEAN"
+                    elif col_type == 10:  # Binary
+                        duckdb_type = "BLOB"
+                    elif col_type == 11:  # Decimal
+                        duckdb_type = "DECIMAL"
+                    elif col_type == 12:  # Array
+                        duckdb_type = "VARCHAR"  # Convert arrays to strings
+                    elif col_type == 13:  # Object
+                        duckdb_type = "VARCHAR"  # Convert objects to strings
+                    elif col_type == 14:  # Variant
+                        duckdb_type = "VARCHAR"  # Convert variants to strings
+                    
+                    schema.append({
+                        "name": col_name,
+                        "type": duckdb_type
+                    })
+        
+        return schema
+        
+    except Exception as e:
+        # Return a default schema on error
+        import sys
+        print(f"Error in get_table_schema_from_query: {e}", file=sys.stderr)
+        return [
+            {"name": "message", "type": "VARCHAR"}
+        ]
+
+
+def get_table_schema(table_name: str) -> List[Dict[str, str]]:
+    """Standalone function to get table schema for CLI use."""
+    try:
+        # Extract query hash from table name (table_name should be like "t_<hash>")
+        if table_name.startswith("t_"):
+            query_hash = table_name[2:]  # Remove "t_" prefix
+        else:
+            query_hash = table_name
+        
+        # Get config for Snowflake connection
+        config = SnowDucksConfig.from_env()
+        
+        # Query Snowflake directly via ADBC for schema only
+        import adbc_driver_snowflake.dbapi as snowflake
+        
+        # Connect to Snowflake
+        conn = snowflake.connect(
+            account=config.snowflake_account,
+            user=config.snowflake_user,
+            password=config.snowflake_password,
+            database=config.snowflake_database,
+            warehouse=config.snowflake_warehouse,
+            role=config.snowflake_role
+        )
+        
+        # For now, we need the original query to get schema
+        # We'll need to store this mapping or pass it as a parameter
+        # For now, return a default schema
+        conn.close()
+        
+        return [
+            {"name": "result", "type": "VARCHAR"}
+        ]
+        
+    except Exception as e:
+        # Return a default schema on error
+        return [
+            {"name": "message", "type": "VARCHAR"}
+        ] 

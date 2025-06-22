@@ -18,7 +18,7 @@
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
 #include <iostream>
-
+#include <glob.h>
 
 namespace duckdb {
 
@@ -81,6 +81,8 @@ inline void SnowducksGenerateCacheTableName(DataChunk &args, ExpressionState &st
 		}
 		string clean_query = oss.str();
 		
+		// Use the same hash generation as Python CLI: generate_normalized_query_hash
+		// This ensures C++ and Python generate the same table names
 		string hash = generate_sha256_hash(clean_query);
 		string table_name = "t_" + hash;
 		
@@ -137,7 +139,7 @@ LogicalType parse_duckdb_type(const string &type_str) {
 	return LogicalType::VARCHAR;
 }
 
-struct SnowducksGlobalState : public GlobalTableFunctionState {
+struct SnowducksTableGlobalState : public GlobalTableFunctionState {
 	bool finished = false;
 };
 
@@ -152,7 +154,7 @@ public:
 	}
 
 private:
-	struct SnowducksBindData : public TableFunctionData {
+	struct SnowducksTableBindData : public TableFunctionData {
 		string original_query;
 		string cache_table_name;
 		int limit;
@@ -161,12 +163,13 @@ private:
 		bool is_cached; // Flag to indicate if the table is cached in DuckLake
 		vector<LogicalType> column_types;
         vector<string> column_names;
+		string fetch_error;
 	};
 
 	static unique_ptr<FunctionData> SnowducksTableBind(ClientContext &context, TableFunctionBindInput &input,
 	                                                   vector<LogicalType> &return_types, vector<string> &names) {
 
-		auto result = make_uniq<SnowducksBindData>();
+		auto result = make_uniq<SnowducksTableBindData>();
 		result->original_query = input.inputs[0].GetValue<string>();
 
 		// Handle named parameters
@@ -186,7 +189,7 @@ private:
 		}
 		
 		if (result->debug) {
-			std::cout << "DEBUG: Binding with query: " << result->original_query << std::endl;
+			std::cout << "DEBUG: Starting bind phase with query: " << result->original_query << std::endl;
 		}
 
 		// Generate cache table name (without limit clause for caching)
@@ -196,7 +199,7 @@ private:
 			query_without_limit = query_without_limit.substr(0, limit_pos);
 		}
 		
-		// Normalize the query the same way as the scalar function
+		// Normalize the query the same way as the Python CLI
 		string normalized = to_lowercase(query_without_limit);
 		std::istringstream iss(normalized);
 		std::ostringstream oss;
@@ -209,28 +212,21 @@ private:
 		}
 		string clean_query = oss.str();
 		
+		// Use the same hash generation as Python CLI: generate_normalized_query_hash
+		// This ensures C++ and Python generate the same table names
 		result->cache_table_name = "t_" + generate_sha256_hash(clean_query);
 		
 		if (result->debug) {
 			std::cout << "DEBUG: Generated cache table name: " << result->cache_table_name << std::endl;
 		}
 
-		// --- Cache Detection Logic ---
-		// We'll use a simple approach: try to connect to the metadata database
-		// and check if the table exists. If it does, we'll set up to return that data.
-		
-		result->is_cached = false;
-		
-		// Try to check if the cache table exists by attempting a connection
-		// This is done during bind time to determine the schema
+		// Check if table exists in cache using DuckLake
 		try {
 			// Create a separate database instance for cache checking
 			DuckDB cache_check_db(":memory:");
 			Connection cache_check_conn(cache_check_db);
-			
 			// Install and load ducklake
 			cache_check_conn.Query("INSTALL ducklake; LOAD ducklake;");
-			
 			// Get connection parameters from environment
 			const char* data_path_env = std::getenv("DUCKLAKE_DATA_PATH");
 			string data_path = data_path_env ? string(data_path_env) : string(std::getenv("HOME")) + "/.snowducks/data";
@@ -246,23 +242,32 @@ private:
 								" user=" + string(pg_user) +
 								" password=" + string(pg_pass) +
 								"' AS metadata (DATA_PATH '" + data_path + "');";
-			
+
 			auto attach_result = cache_check_conn.Query(attach_sql);
 			if (!attach_result->HasError()) {
 				cache_check_conn.Query("USE metadata;");
 				
-				// Try to describe the table to get its schema
-				string describe_sql = "DESCRIBE " + result->cache_table_name + ";";
-				auto describe_result = cache_check_conn.Query(describe_sql);
+				// Get the schema name for the table
+				string schema_name = "main"; // Default schema name - Python CLI creates tables in main schema
+				const char* schema_env = std::getenv("DUCKLAKE_SCHEMA");
+				if (schema_env) {
+					schema_name = string(schema_env);
+				}
 				
+				// Try to describe the table to get its schema
+				string full_table_name = schema_name + "." + result->cache_table_name;
+				string describe_sql = "DESCRIBE " + full_table_name + ";";
+				
+				if (result->debug) {
+					std::cout << "DEBUG: Checking table: " << full_table_name << std::endl;
+				}
+				
+				auto describe_result = cache_check_conn.Query(describe_sql);
 				if (!describe_result->HasError() && describe_result->RowCount() > 0) {
 					result->is_cached = true;
-					
 					if (result->debug) {
 						std::cout << "DEBUG: Found cached table " << result->cache_table_name << " with " << describe_result->RowCount() << " columns" << std::endl;
 					}
-					
-					// Extract column information from DESCRIBE result
 					while (true) {
 						auto chunk = describe_result->Fetch();
 						if (!chunk || chunk->size() == 0) break;
@@ -270,15 +275,21 @@ private:
 						for (idx_t i = 0; i < chunk->size(); i++) {
 							string col_name = chunk->GetValue(0, i).ToString();
 							string col_type = chunk->GetValue(1, i).ToString();
-							
 							names.push_back(col_name);
 							return_types.push_back(parse_duckdb_type(col_type));
-							
 							if (result->debug) {
 								std::cout << "DEBUG: Column: " << col_name << " -> " << col_type << std::endl;
 							}
 						}
 					}
+				} else {
+					if (result->debug) {
+						std::cout << "DEBUG: Table " << result->cache_table_name << " not found in cache" << std::endl;
+					}
+				}
+			} else {
+				if (result->debug) {
+					std::cout << "DEBUG: Failed to attach DuckLake: " << attach_result->GetError() << std::endl;
 				}
 			}
 		} catch (const std::exception& e) {
@@ -287,117 +298,397 @@ private:
 			}
 		}
 		
-		// If no cached table found, provide a simple schema for status messages
+		// If no cached table found, get schema from query parsing
 		if (!result->is_cached) {
-			names.push_back("message");
-			return_types.push_back(LogicalType::VARCHAR);
+			if (result->debug) {
+				std::cout << "DEBUG: Getting schema from query parsing" << std::endl;
+			}
+			
+			// Call Python CLI to get schema from query parsing
+			string python_cmd = "cd " + string(getenv("HOME") ? getenv("HOME") : "") + "/Documents/projects/snowducks && source venv/bin/activate && python -m snowducks.cli get-schema " + result->cache_table_name + " \"" + result->original_query + "\" 2>&1";
+			
+			if (result->debug) {
+				std::cout << "DEBUG: Getting schema from query parsing: " << python_cmd << std::endl;
+			}
+			
+			FILE* pipe = popen(python_cmd.c_str(), "r");
+			if (pipe) {
+				// Read the output
+				string cli_result;
+				char buffer[128];
+				while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+					cli_result += buffer;
+				}
+				
+				int status = pclose(pipe);
+				
+				if (status == 0) {
+					if (result->debug) {
+						std::cout << "DEBUG: Python CLI succeeded, parsing schema from: " << cli_result << std::endl;
+					}
+					
+					// Parse schema from Python CLI output
+					// Expected format: {"status": "success", "schema": [{"name": "col1", "type": "VARCHAR"}, ...]}
+					bool schema_parsed = false;
+					try {
+						// Simple JSON parsing for schema
+						size_t schema_start = cli_result.find("\"schema\":");
+						if (schema_start != string::npos) {
+							if (result->debug) {
+								std::cout << "DEBUG: Found schema key at position " << schema_start << std::endl;
+							}
+							
+							size_t schema_array_start = cli_result.find("[", schema_start);
+							size_t schema_array_end = cli_result.find("]", schema_array_start);
+							
+							if (schema_array_start != string::npos && schema_array_end != string::npos) {
+								if (result->debug) {
+									std::cout << "DEBUG: Found schema array from " << schema_array_start << " to " << schema_array_end << std::endl;
+								}
+								
+								string schema_json = cli_result.substr(schema_array_start + 1, schema_array_end - schema_array_start - 1);
+								
+								if (result->debug) {
+									std::cout << "DEBUG: Schema JSON content: '" << schema_json << "'" << std::endl;
+								}
+								
+								// Parse each column definition
+								size_t pos = 0;
+								int column_count = 0;
+								while (pos < schema_json.length()) {
+									// Find next column definition
+									size_t col_start = schema_json.find("{", pos);
+									if (col_start == string::npos) {
+										if (result->debug) {
+											std::cout << "DEBUG: No more column definitions found at position " << pos << std::endl;
+										}
+										break;
+									}
+									
+									size_t col_end = schema_json.find("}", col_start);
+									if (col_end == string::npos) {
+										if (result->debug) {
+											std::cout << "DEBUG: No closing brace found for column at position " << col_start << std::endl;
+										}
+										break;
+									}
+									
+									string col_def = schema_json.substr(col_start + 1, col_end - col_start - 1);
+									
+									if (result->debug) {
+										std::cout << "DEBUG: Parsing column definition: '" << col_def << "'" << std::endl;
+									}
+									
+									// Extract name and type
+									size_t name_start = col_def.find("\"name\":");
+									size_t type_start = col_def.find("\"type\":");
+									
+									if (name_start != string::npos && type_start != string::npos) {
+										name_start += 7; // Skip "name":
+										// Skip any whitespace after the colon
+										while (name_start < col_def.length() && (col_def[name_start] == ' ' || col_def[name_start] == '\t')) {
+											name_start++;
+										}
+										// Skip the opening quote
+										if (name_start < col_def.length() && col_def[name_start] == '"') {
+											name_start++;
+										}
+										size_t name_end = col_def.find("\"", name_start);
+										
+										type_start += 7; // Skip "type":
+										// Skip any whitespace after the colon
+										while (type_start < col_def.length() && (col_def[type_start] == ' ' || col_def[type_start] == '\t')) {
+											type_start++;
+										}
+										// Skip the opening quote
+										if (type_start < col_def.length() && col_def[type_start] == '"') {
+											type_start++;
+										}
+										size_t type_end = col_def.find("\"", type_start);
+										
+										if (name_end != string::npos && type_end != string::npos) {
+											string col_name = col_def.substr(name_start, name_end - name_start);
+											string col_type = col_def.substr(type_start, type_end - type_start);
+											
+											if (result->debug) {
+												std::cout << "DEBUG: Extracted column: name='" << col_name << "', type='" << col_type << "'" << std::endl;
+											}
+											
+											// Convert type string to LogicalType
+											LogicalType logical_type = LogicalType::VARCHAR; // Default
+											if (col_type == "VARCHAR" || col_type == "STRING" || col_type == "TEXT") {
+												logical_type = LogicalType::VARCHAR;
+											} else if (col_type == "INTEGER" || col_type == "INT") {
+												logical_type = LogicalType::INTEGER;
+											} else if (col_type == "BIGINT") {
+												logical_type = LogicalType::BIGINT;
+											} else if (col_type == "DOUBLE" || col_type == "FLOAT") {
+												logical_type = LogicalType::DOUBLE;
+											} else if (col_type == "BOOLEAN" || col_type == "BOOL") {
+												logical_type = LogicalType::BOOLEAN;
+											} else if (col_type == "DATE") {
+												logical_type = LogicalType::DATE;
+											} else if (col_type == "TIMESTAMP") {
+												logical_type = LogicalType::TIMESTAMP;
+											}
+											
+											names.push_back(col_name);
+											return_types.push_back(logical_type);
+											column_count++;
+											
+											if (result->debug) {
+												std::cout << "DEBUG: Added column " << column_count << ": " << col_name << " -> " << col_type << std::endl;
+											}
+										} else {
+											if (result->debug) {
+												std::cout << "DEBUG: Could not find name or type end quotes" << std::endl;
+											}
+										}
+									} else {
+										if (result->debug) {
+											std::cout << "DEBUG: Could not find name or type keys in column definition" << std::endl;
+										}
+									}
+									
+									pos = col_end + 1;
+								}
+								
+								if (result->debug) {
+									std::cout << "DEBUG: Finished parsing, found " << column_count << " columns" << std::endl;
+								}
+								
+								schema_parsed = true;
+							} else {
+								if (result->debug) {
+									std::cout << "DEBUG: Could not find schema array brackets" << std::endl;
+								}
+							}
+						} else {
+							if (result->debug) {
+								std::cout << "DEBUG: Could not find schema key in JSON" << std::endl;
+							}
+						}
+					} catch (const std::exception& e) {
+						if (result->debug) {
+							std::cout << "DEBUG: Schema parsing failed: " << e.what() << std::endl;
+						}
+					}
+					
+					if (!schema_parsed) {
+						if (result->debug) {
+							std::cout << "DEBUG: Could not parse schema from Python output, using default" << std::endl;
+						}
+						// Fallback to default schema
+						names.push_back("message");
+						return_types.push_back(LogicalType::VARCHAR);
+						result->fetch_error = "Could not parse schema from Python CLI output";
+					} else {
+						if (result->debug) {
+							std::cout << "DEBUG: Successfully parsed schema with " << names.size() << " columns" << std::endl;
+						}
+					}
+				} else {
+					if (result->debug) {
+						std::cout << "DEBUG: Python CLI failed with status " << status << std::endl;
+						std::cout << "DEBUG: Output: " << cli_result << std::endl;
+					}
+					// Set up error schema
+					names.push_back("message");
+					return_types.push_back(LogicalType::VARCHAR);
+					result->fetch_error = "Failed to get schema from query parsing: " + cli_result;
+				}
+			} else {
+				if (result->debug) {
+					std::cout << "DEBUG: Failed to execute Python CLI" << std::endl;
+				}
+				names.push_back("message");
+				return_types.push_back(LogicalType::VARCHAR);
+				result->fetch_error = "Failed to execute Python CLI";
+			}
 		}
 		
 		result->column_names = names;
 		result->column_types = return_types;
 
+		if (result->debug) {
+			std::cout << "DEBUG: Bind phase complete, returning schema with " << names.size() << " columns" << std::endl;
+		}
+
 		return std::move(result);
 	}
 
 	static unique_ptr<GlobalTableFunctionState> SnowducksTableInit(ClientContext &context, TableFunctionInitInput &input) {
-		return make_uniq<GlobalTableFunctionState>();
+		return make_uniq<SnowducksTableGlobalState>();
 	}
 
 	static void SnowducksTableFunc(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-		auto &data = (SnowducksBindData &)*data_p.bind_data;
-		auto &gstate = (SnowducksGlobalState &)*data_p.global_state;
-
-		if (gstate.finished) {
+		auto &bind_data = (SnowducksTableBindData &)*data_p.bind_data;
+		auto &global_state = (SnowducksTableGlobalState &)*data_p.global_state;
+		
+		if (global_state.finished) {
 			return;
 		}
 		
-		// If the table is cached, try to return the actual data
-		if (data.is_cached && !data.force_refresh) {
-			try {
-				// Create a separate database instance for data retrieval
-				DuckDB data_db(":memory:");
-				Connection data_conn(data_db);
-				
-				// Install and load ducklake
-				data_conn.Query("INSTALL ducklake; LOAD ducklake;");
-				
-				// Get connection parameters from environment
-				const char* data_path_env = std::getenv("DUCKLAKE_DATA_PATH");
-				string data_path = data_path_env ? string(data_path_env) : string(std::getenv("HOME")) + "/.snowducks/data";
-				const char* pg_host = std::getenv("PG_HOST") ? std::getenv("PG_HOST") : "localhost";
-				const char* pg_port = std::getenv("PG_PORT") ? std::getenv("PG_PORT") : "5432";
-				const char* pg_db = std::getenv("PG_DB") ? std::getenv("PG_DB") : "snowducks_metadata";
-				const char* pg_user = std::getenv("PG_USER") ? std::getenv("PG_USER") : "snowducks_user";
-				const char* pg_pass = std::getenv("PG_PASS") ? std::getenv("PG_PASS") : "snowducks_password";
-
-				string attach_sql = "ATTACH 'ducklake:postgres:host=" + string(pg_host) +
-									" port=" + string(pg_port) +
-									" dbname=" + string(pg_db) +
-									" user=" + string(pg_user) +
-									" password=" + string(pg_pass) +
-									"' AS metadata (DATA_PATH '" + data_path + "');";
-				
-				auto attach_result = data_conn.Query(attach_sql);
-				if (!attach_result->HasError()) {
-					data_conn.Query("USE metadata;");
-					
-					// Query the cached data with the specified limit
-					string query_sql = "SELECT * FROM " + data.cache_table_name + " LIMIT " + std::to_string(data.limit) + ";";
-					
-					if (data.debug) {
-						std::cout << "DEBUG: Executing query: " << query_sql << std::endl;
-					}
-					
-					auto query_result = data_conn.Query(query_sql);
-					
-					if (!query_result->HasError()) {
-						auto chunk = query_result->Fetch();
-						if (chunk && chunk->size() > 0) {
-							// Copy the data to the output
-							output.SetCardinality(chunk->size());
-							for (idx_t col_idx = 0; col_idx < chunk->ColumnCount() && col_idx < output.ColumnCount(); col_idx++) {
-								output.data[col_idx].Reference(chunk->data[col_idx]);
-							}
-							
-							if (data.debug) {
-								std::cout << "DEBUG: Returned " << chunk->size() << " rows from cached table" << std::endl;
-							}
-							
-							gstate.finished = true;
-							return;
-						}
-					} else {
-						if (data.debug) {
-							std::cout << "DEBUG: Query failed: " << query_result->GetError() << std::endl;
-						}
-					}
-				} else {
-					if (data.debug) {
-						std::cout << "DEBUG: Attach failed: " << attach_result->GetError() << std::endl;
-					}
+		// Check if we need to fetch data
+		if (!bind_data.is_cached) {
+			if (bind_data.debug) {
+				std::cout << "DEBUG: Table not cached, fetching from Snowflake" << std::endl;
+			}
+			
+			// Call Python CLI to fetch and cache the data
+			string python_cmd = "cd " + string(getenv("HOME") ? getenv("HOME") : "") + "/Documents/projects/snowducks && source venv/bin/activate && python -m snowducks.cli query --query \"" + bind_data.original_query + "\" 2>&1";
+			
+			if (bind_data.debug) {
+				std::cout << "DEBUG: Executing Python CLI: " << python_cmd << std::endl;
+			}
+			
+			FILE* pipe = popen(python_cmd.c_str(), "r");
+			if (pipe) {
+				string cli_result;
+				char buffer[128];
+				while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+					cli_result += buffer;
 				}
-			} catch (const std::exception& e) {
-				if (data.debug) {
-					std::cout << "DEBUG: Data retrieval failed: " << e.what() << std::endl;
+				
+				int status = pclose(pipe);
+				
+				if (status != 0) {
+					if (bind_data.debug) {
+						std::cout << "DEBUG: Python CLI failed with status " << status << std::endl;
+						std::cout << "DEBUG: Output: " << cli_result << std::endl;
+					}
+					
+					// Return error message
+					output.SetCardinality(1);
+					output.data[0].SetValue(0, Value(bind_data.fetch_error.empty() ? "Failed to fetch data from Snowflake" : bind_data.fetch_error));
+					global_state.finished = true;
+					return;
 				}
+				
+				if (bind_data.debug) {
+					std::cout << "DEBUG: Python CLI succeeded, data cached" << std::endl;
+				}
+			} else {
+				if (bind_data.debug) {
+					std::cout << "DEBUG: Failed to execute Python CLI" << std::endl;
+				}
+				
+				// Return error message
+				output.SetCardinality(1);
+				output.data[0].SetValue(0, Value("Failed to execute Python CLI"));
+				global_state.finished = true;
+				return;
 			}
 		}
 		
-		// Fallback: return instructions or error messages
-		string msg;
-		
-		if (data.force_refresh) {
-			msg = "Force refresh requested. Run: python -m snowducks.cli '" + data.original_query + "' --force";
-		} else if (!data.is_cached) {
-			msg = "Cache miss for table " + data.cache_table_name + ". Run: python -m snowducks.cli '" + data.original_query + "'";
-		} else {
-			msg = "Failed to retrieve cached data for table " + data.cache_table_name + ". Check logs for details.";
+		// Now read from the cached Parquet file
+		try {
+			// Create a separate database instance for reading cached data
+			DuckDB read_db(":memory:");
+			Connection read_conn(read_db);
+			// Install and load ducklake
+			read_conn.Query("INSTALL ducklake; LOAD ducklake;");
+			// Get connection parameters from environment
+			const char* data_path_env = std::getenv("DUCKLAKE_DATA_PATH");
+			string data_path = data_path_env ? string(data_path_env) : string(std::getenv("HOME")) + "/.snowducks/data";
+			const char* pg_host = std::getenv("PG_HOST") ? std::getenv("PG_HOST") : "localhost";
+			const char* pg_port = std::getenv("PG_PORT") ? std::getenv("PG_PORT") : "5432";
+			const char* pg_db = std::getenv("PG_DB") ? std::getenv("PG_DB") : "snowducks_metadata";
+			const char* pg_user = std::getenv("PG_USER") ? std::getenv("PG_USER") : "snowducks_user";
+			const char* pg_pass = std::getenv("PG_PASS") ? std::getenv("PG_PASS") : "snowducks_password";
+
+			string attach_sql = "ATTACH 'ducklake:postgres:host=" + string(pg_host) +
+								" port=" + string(pg_port) +
+								" dbname=" + string(pg_db) +
+								" user=" + string(pg_user) +
+								" password=" + string(pg_pass) +
+								"' AS metadata (DATA_PATH '" + data_path + "');";
+
+			auto attach_result = read_conn.Query(attach_sql);
+			if (!attach_result->HasError()) {
+				read_conn.Query("USE metadata;");
+				
+				// Get the schema name for the table
+				string schema_name = "main"; // Default schema name - Python CLI creates tables in main schema
+				const char* schema_env = std::getenv("DUCKLAKE_SCHEMA");
+				if (schema_env) {
+					schema_name = string(schema_env);
+				}
+				
+				// Read from the cached table with full schema name
+				string full_table_name = schema_name + "." + bind_data.cache_table_name;
+				string select_sql = "SELECT * FROM " + full_table_name + ";";
+				
+				if (bind_data.debug) {
+					std::cout << "DEBUG: Reading from table: " << full_table_name << std::endl;
+				}
+				
+				auto select_result = read_conn.Query(select_sql);
+				
+				if (!select_result->HasError()) {
+					if (bind_data.debug) {
+						std::cout << "DEBUG: Successfully read from cached table, " << select_result->RowCount() << " rows" << std::endl;
+					}
+					
+					// Copy data to output chunk
+					idx_t row_count = 0;
+					while (true) {
+						auto chunk = select_result->Fetch();
+						if (!chunk || chunk->size() == 0) break;
+						
+						idx_t chunk_size = chunk->size();
+						output.SetCardinality(chunk_size);
+						
+						for (idx_t col_idx = 0; col_idx < chunk->ColumnCount(); col_idx++) {
+							for (idx_t row_idx = 0; row_idx < chunk_size; row_idx++) {
+								output.data[col_idx].SetValue(row_idx, chunk->GetValue(col_idx, row_idx));
+							}
+						}
+						
+						row_count += chunk_size;
+						if (bind_data.debug) {
+							std::cout << "DEBUG: Output chunk with " << chunk_size << " rows" << std::endl;
+						}
+						
+						// Return this chunk
+						global_state.finished = (row_count >= select_result->RowCount());
+						return;
+					}
+					
+					global_state.finished = true;
+				} else {
+					if (bind_data.debug) {
+						std::cout << "DEBUG: Failed to read from cached table: " << select_result->GetError() << std::endl;
+					}
+					
+					// Return error message
+					output.SetCardinality(1);
+					output.data[0].SetValue(0, Value("Failed to read from cached table: " + select_result->GetError()));
+					global_state.finished = true;
+				}
+			} else {
+				if (bind_data.debug) {
+					std::cout << "DEBUG: Failed to attach DuckLake for reading: " << attach_result->GetError() << std::endl;
+				}
+				
+				// Return error message
+				output.SetCardinality(1);
+				output.data[0].SetValue(0, Value("Failed to attach DuckLake for reading: " + attach_result->GetError()));
+				global_state.finished = true;
+			}
+		} catch (const std::exception& e) {
+			if (bind_data.debug) {
+				std::cout << "DEBUG: Error reading cached data: " << e.what() << std::endl;
+			}
+			
+			// Return error message
+			output.SetCardinality(1);
+			output.data[0].SetValue(0, Value("Error reading cached data: " + string(e.what())));
+			global_state.finished = true;
 		}
-		
-		output.SetCardinality(1);
-		output.SetValue(0, 0, Value(msg));
-		gstate.finished = true;
 	}
+
+
 };
 
 static void LoadInternal(DatabaseInstance &instance) {

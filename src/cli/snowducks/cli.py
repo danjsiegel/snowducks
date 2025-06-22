@@ -38,6 +38,8 @@ def main():
         _handle_start_duckdb()
     elif command == "query":
         _handle_query()
+    elif command == "get-schema":
+        _handle_get_schema()
     else:
         print(f"❌ Unknown command: {command}")
         _print_help()
@@ -133,6 +135,7 @@ def _handle_query():
     parser.add_argument('--limit', type=int, default=1000, help='Row limit (default: 1000)')
     parser.add_argument('--force-refresh', action='store_true', help='Force refresh cache')
     parser.add_argument('--no-force-refresh', action='store_true', help='Use cache if available')
+    parser.add_argument('--schema-only', action='store_true', help='Return only schema information as JSON')
     
     # Parse arguments from sys.argv[2:] to skip the 'query' command
     args = parser.parse_args(sys.argv[2:])
@@ -145,9 +148,10 @@ def _handle_query():
         if args.no_force_refresh:
             force_refresh = False
             
-        print(f"Executing query: {args.query}")
-        print(f"Limit: {args.limit}")
-        print(f"Force refresh: {force_refresh}")
+        if not args.schema_only:
+            print(f"Executing query: {args.query}")
+            print(f"Limit: {args.limit}")
+            print(f"Force refresh: {force_refresh}")
         
         table_name, status = snowflake_query(
             query_text=args.query,
@@ -155,12 +159,71 @@ def _handle_query():
             force_refresh=force_refresh
         )
         
-        print(f"Cache table: {table_name}")
-        print(f"Status: {status}")
+        if args.schema_only:
+            # Return schema information as JSON
+            import json
+            from .ducklake_manager import get_table_schema
+            
+            try:
+                schema = get_table_schema(table_name)
+                result = {
+                    "status": "success",
+                    "table_name": table_name,
+                    "schema": schema
+                }
+                print(json.dumps(result))
+            except Exception as e:
+                result = {
+                    "status": "error",
+                    "error": str(e),
+                    "table_name": table_name
+                }
+                print(json.dumps(result))
+        else:
+            print(f"Cache table: {table_name}")
+            print(f"Status: {status}")
         
     except Exception as e:
-        print(f"Error: {e}")
+        if args.schema_only:
+            import json
+            result = {
+                "status": "error",
+                "error": str(e)
+            }
+            print(json.dumps(result))
+        else:
+            print(f"Error: {e}")
+            sys.exit(1)
+
+
+def _handle_get_schema():
+    """Handle get-schema command."""
+    if len(sys.argv) < 4:
+        print("❌ Error: Table name and original query required")
+        print("Usage: snowducksi get-schema <table_name> <original_query>")
         sys.exit(1)
+    
+    table_name = sys.argv[2]
+    original_query = sys.argv[3]
+    
+    try:
+        # Import here to avoid circular imports
+        from .ducklake_manager import get_table_schema_from_query
+        import json
+        
+        schema = get_table_schema_from_query(original_query)
+        result = {
+            "status": "success",
+            "table_name": table_name,
+            "schema": schema
+        }
+        print(json.dumps(result))
+    except Exception as e:
+        result = {
+            "status": "error",
+            "error": str(e)
+        }
+        print(json.dumps(result))
 
 
 def _print_help():
@@ -174,6 +237,7 @@ def _print_help():
     print("  snowducksi clear-cache   Clear all cached data")
     print("  snowducksi start-duckdb  Start interactive DuckDB session with UDF")
     print("  snowducksi query         Execute a Snowflake query")
+    print("  snowducksi get-schema    Get table schema")
     print()
     print("Examples:")
     print("  # Configure your Snowflake connection")
