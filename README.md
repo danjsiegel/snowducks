@@ -439,6 +439,21 @@ SnowDucks implements a carefully designed order of operations to ensure data ava
 
 ## Future Development Ideas
 
+### 🏗️ Architectural Rearchitecture: Pure C++ Implementation
+
+**The Problem I Built Myself Into:**
+So I built the Python CLI stuff in isolation without really reading the DuckDB extension docs properly. I got it fully working with the DuckDB CLI, then I tried to import the UDF to the DuckDB UI, turns out you can't actually do that. 
+
+**What I Was Doing Wrong:**
+I was trying to load a Python UDF into the DuckDB UI, but it needed to be compiled binaries (`.duckdb_extension` files) that are platform-specific and version-tied (or I'm just an idiot and I don't know what I'm talking about. Either is viable). The extension-template requires you to actually build a C++ binary that gets distributed for specific platforms (linux_amd64, osx_arm64, etc.). You can't just load Python code directly (FML) it has to go through the proper extension framework with signed binaries.
+
+**My Better Idea: ADBC-Based Pure C++ Implementation**
+
+#### 🎯 What I Should Have Done From The Start
+- **Kill the Python Stuff**: Remove `venv/`, Python CLI, and all that Python runtime baggage
+- **Go Native with ADBC**: Use Apache Arrow Database Connectivity (ADBC) to talk directly to Snowflake from C++
+- **One Extension to Rule Them All**: Single C++ extension that handles both data fetching and caching
+- **Actually Work with DuckDB UI**: Full integration with DuckDB's native web interface and CLI (the way it's supposed to work)
 Based on DuckLake's capabilities and community feedback opportunities, here are potential enhancements for future versions:
 
 ### 🗄️ Additional Storage Backends
