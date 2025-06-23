@@ -3,12 +3,10 @@ Configuration management for SnowDucks using DuckLake.
 """
 
 import os
-import platform
 from pathlib import Path
 from typing import Optional, Dict, Any, Literal
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
-import urllib.parse
 
 from .exceptions import ConfigError
 
@@ -87,7 +85,8 @@ class SnowDucksConfig:
         missing_params = [k for k, v in required_params.items() if not v]
         if missing_params:
             raise ConfigError(
-                f"Missing required environment variables: {', '.join(missing_params)}"
+                f"Missing required environment variables: "
+                f"{', '.join(missing_params)}"
             )
 
         # Authentication method detection
@@ -195,7 +194,8 @@ class SnowDucksConfig:
         # Default to password authentication
         raise ConfigError(
             "No authentication method found. Please set one of: "
-            "SNOWFLAKE_PASSWORD, SNOWFLAKE_PRIVATE_KEY_PATH, or SNOWFLAKE_AUTHENTICATOR=externalbrowser"
+            "SNOWFLAKE_PASSWORD, SNOWFLAKE_PRIVATE_KEY_PATH, or "
+            "SNOWFLAKE_AUTHENTICATOR=externalbrowser"
         )
 
     @staticmethod
@@ -222,7 +222,7 @@ class SnowDucksConfig:
             )
             if response.status_code == 200:
                 return "cloud"
-        except:
+        except Exception:
             pass
 
         return "local"
@@ -269,11 +269,13 @@ class SnowDucksConfig:
 
         if self.snowflake_private_key_path:
             params.append(
-                f"adbc.snowflake.auth.private_key_path={self.snowflake_private_key_path}"
+                "adbc.snowflake.auth.private_key_path="
+                f"{self.snowflake_private_key_path}"
             )
             if self.snowflake_private_key_passphrase:
                 params.append(
-                    f"adbc.snowflake.auth.private_key_passphrase={self.snowflake_private_key_passphrase}"
+                    "adbc.snowflake.auth.private_key_passphrase="
+                    f"{self.snowflake_private_key_passphrase}"
                 )
 
         return f"{base_uri}?{'&'.join(params)}"
@@ -289,7 +291,11 @@ class SnowDucksConfig:
             raise ConfigError(
                 "PostgreSQL configuration is required for DuckLake metadata."
             )
-        return f"ducklake:postgres:dbname={self.postgres_database} host={self.postgres_host} user={self.postgres_user} password={self.postgres_password}"
+        return (
+            f"ducklake:postgres:dbname={self.postgres_database} "
+            f"host={self.postgres_host} user={self.postgres_user} "
+            f"password={self.postgres_password}"
+        )
 
     def get_duckdb_database_path(self) -> str:
         """Get the DuckDB database path for both CLI and extension use."""
@@ -346,7 +352,7 @@ class SnowDucksConfig:
             key_path = Path(self.snowflake_private_key_path)
             if not key_path.exists():
                 raise ConfigError(
-                    f"Private key file not found: {self.snowflake_private_key_path}"
+                    f"Private key file not found: " f"{self.snowflake_private_key_path}"
                 )
 
         # Validate S3 configuration

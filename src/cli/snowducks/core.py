@@ -7,12 +7,21 @@ import re
 import time
 import tempfile
 import warnings
-from pathlib import Path
 from typing import Optional
 import duckdb
 import pyarrow.parquet as pq
 import urllib.parse
-import pyarrow as pa
+import sys
+
+from .config import SnowDucksConfig
+from .ducklake_manager import DuckLakeManager
+from .exceptions import (
+    SnowDucksError,
+    ConnectionError,
+    PermissionError,
+    QueryError,
+    DuckLakeError,
+)
 
 # Suppress gosnowflake warnings about application directory
 os.environ["SNOWFLAKE_APPLICATION"] = "SnowDucks"
@@ -26,17 +35,6 @@ warnings.filterwarnings(
     "ignore", message=".*Unable to access the application directory.*"
 )
 warnings.filterwarnings("ignore", message=".*cannot find executable path.*")
-
-from .config import SnowDucksConfig
-from .ducklake_manager import DuckLakeManager
-from .exceptions import (
-    SnowDucksError,
-    ConnectionError,
-    PermissionError,
-    QueryError,
-    ConfigError,
-    DuckLakeError,
-)
 
 # Global configuration and managers
 _config: Optional[SnowDucksConfig] = None
@@ -189,7 +187,7 @@ def snowflake_query(
             return cached_table, "hit"
 
     # Cache miss or force refresh - fetch from Snowflake
-    print(f"CACHE MISS: Fetching from Snowflake")
+    print("CACHE MISS: Fetching from Snowflake")
 
     # Egress cost governance check
     if limit == -1 and not config.allow_unlimited_egress:
@@ -221,7 +219,11 @@ def snowflake_query(
 
         # Build URI according to ADBC documentation format
         # Format: user:password@account/database?param1=value1&paramN=valueN
-        conn_uri = f"{config.snowflake_user}:{encoded_password}@{config.snowflake_account}/{config.snowflake_database}?warehouse={config.snowflake_warehouse}&role={config.snowflake_role}"
+        conn_uri = (
+            f"{config.snowflake_user}:{encoded_password}@"
+            f"{config.snowflake_account}/{config.snowflake_database}"
+            f"?warehouse={config.snowflake_warehouse}&role={config.snowflake_role}"
+        )
 
         with snowflake_adbc.connect(uri=conn_uri) as conn:
             with conn.cursor() as cursor:
@@ -282,7 +284,6 @@ def register_snowflake_udf(con: duckdb.DuckDBPyConnection) -> None:
         # Import DuckDB types
         from duckdb.typing import VARCHAR, INTEGER, BOOLEAN
 
-        # Create a wrapper function that returns the persistent table name and cache status
         def snowflake_query_wrapper(
             query_text: str, limit: int = 1000, force_refresh: bool = False
         ) -> str:
@@ -303,6 +304,10 @@ def register_snowflake_udf(con: duckdb.DuckDBPyConnection) -> None:
         print("Successfully registered UDF: snowflake_query")
         print("💡 Usage: SELECT * FROM snowflake_query('your query', 1000, false)")
         print("   The UDF returns a table name that you can query directly!")
+        print(
+            "💡 The UDF works like a real table - use it in FROM, JOIN, CTEs, etc!",
+            file=sys.stderr,
+        )
     except Exception as e:
         raise SnowDucksError(f"Failed to register UDF: {e}") from e
 
@@ -322,9 +327,10 @@ def register_snowflake_udf_native(con: duckdb.DuckDBPyConnection) -> None:
         # This is a placeholder that can be extended with native SQL capabilities
         con.execute(
             """
-            CREATE OR REPLACE FUNCTION snowflake_query_native(query_text VARCHAR) 
+            CREATE OR REPLACE FUNCTION snowflake_query_native(query_text VARCHAR)
             RETURNS VARCHAR AS $$
-                SELECT 'Native UDF: ' || query_text || ' (Python extension required for full functionality)';
+                SELECT 'Native UDF: ' || query_text ||
+                       ' (Python extension required for full functionality)';
             $$;
         """
         )
@@ -349,17 +355,18 @@ def create_ui_compatible_script() -> str:
 -- This script provides basic functionality for the DuckDB UI
 
 -- Create a simple native function
-CREATE OR REPLACE FUNCTION snowducks_status() 
+CREATE OR REPLACE FUNCTION snowducks_status()
 RETURNS VARCHAR AS $$
-    SELECT 'SnowDucks is available! Use interactive session for full Python UDF functionality.';
+    SELECT 'SnowDucks is available! '
+           'Use interactive session for full Python UDF functionality.';
 $$;
 
 -- Create a function to show available tables
-CREATE OR REPLACE FUNCTION snowducks_list_tables() 
+CREATE OR REPLACE FUNCTION snowducks_list_tables()
 RETURNS TABLE(table_name VARCHAR, table_type VARCHAR) AS $$
-    SELECT table_name, table_type 
-    FROM information_schema.tables 
-    WHERE table_schema = 'main' 
+    SELECT table_name, table_type
+    FROM information_schema.tables
+    WHERE table_schema = 'main'
     ORDER BY table_name;
 $$;
 
@@ -368,7 +375,7 @@ SELECT snowducks_status() as status;
 SELECT * FROM snowducks_list_tables() LIMIT 10;
 
 -- Show usage instructions
-SELECT 
+SELECT
     'UI Limitations:' as note,
     'Python extension not available in UI' as limitation1,
     'Use interactive session for full SnowDucks functionality' as recommendation1,
@@ -512,7 +519,8 @@ def test_connection() -> bool:
 
         except Exception as adbc_error:
             print(
-                f"⚠️  ADBC connection failed, falling back to standard connector: {adbc_error}"
+                "⚠️  ADBC connection failed, falling back to standard connector: ",
+                f"{adbc_error}",
             )
 
             # Fallback to standard Snowflake connector

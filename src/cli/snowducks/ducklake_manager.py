@@ -2,21 +2,16 @@
 DuckLake manager for SnowDucks - handles DuckLake database operations and cache recency.
 """
 
-import json
 import time
 import fcntl
-import os
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 import duckdb
-import sqlite3
 
 from .config import SnowDucksConfig
-from .exceptions import DuckLakeError, QueryError
+from .exceptions import DuckLakeError
 from .utils import (
     generate_normalized_query_hash,
-    generate_query_hash_without_limit,
     parse_query_metadata,
 )
 
@@ -50,7 +45,8 @@ class DuckLakeManager:
             ducklake_attach_string = self.config.get_ducklake_attach_string()
             data_path = str(self.config.ducklake_data_path)
             self.duckdb_connection.execute(
-                f"ATTACH '{ducklake_attach_string}' AS snowducks_ducklake (DATA_PATH '{data_path}')"
+                f"ATTACH '{ducklake_attach_string}' AS snowducks_ducklake "
+                f"(DATA_PATH '{data_path}')"
             )
             self.ducklake_attached = True
             # Create metadata tables if they don't exist (don't drop existing ones)
@@ -162,7 +158,7 @@ class DuckLakeManager:
 
         try:
             return getpass.getuser()
-        except:
+        except Exception:
             return "unknown"
 
     def _is_cache_fresh(self, query_hash: str) -> bool:
@@ -173,8 +169,8 @@ class DuckLakeManager:
         schema_name = self._get_schema_name()
         result = self.duckdb_connection.execute(
             f"""
-            SELECT last_refresh, cache_max_age_hours 
-            FROM {schema_name}.snowducks_queries 
+            SELECT last_refresh, cache_max_age_hours
+            FROM {schema_name}.snowducks_queries
             WHERE query_hash = ?
         """,
             [query_hash],
@@ -202,7 +198,7 @@ class DuckLakeManager:
         # Check in the expected schema first
         result = self.duckdb_connection.execute(
             """
-            SELECT COUNT(*) FROM information_schema.tables 
+            SELECT COUNT(*) FROM information_schema.tables
             WHERE table_schema = ? AND table_name = ?
         """,
             [schema_name, table_name],
@@ -214,7 +210,7 @@ class DuckLakeManager:
         # Fallback: check in main schema (for old cached tables)
         result = self.duckdb_connection.execute(
             """
-            SELECT COUNT(*) FROM information_schema.tables 
+            SELECT COUNT(*) FROM information_schema.tables
             WHERE table_schema = 'main' AND table_name = ?
         """,
             [table_name],
@@ -245,7 +241,7 @@ class DuckLakeManager:
         schema_name = self._get_schema_name()
         result = self.duckdb_connection.execute(
             f"""
-            SELECT limit_value FROM {schema_name}.snowducks_query_metadata 
+            SELECT limit_value FROM {schema_name}.snowducks_query_metadata
             WHERE query_hash = ?
         """,
             [query_hash],
@@ -263,7 +259,7 @@ class DuckLakeManager:
         schema_name = self._get_schema_name()
         self.duckdb_connection.execute(
             f"""
-            UPDATE {schema_name}.snowducks_queries 
+            UPDATE {schema_name}.snowducks_queries
             SET last_used = ?, usage_count = usage_count + 1
             WHERE query_hash = ?
         """,
@@ -290,7 +286,7 @@ class DuckLakeManager:
         try:
             # Create table from Parquet file using a more robust approach
             create_sql = f"""
-                CREATE OR REPLACE TABLE {fq_table_name} AS 
+                CREATE OR REPLACE TABLE {fq_table_name} AS
                 SELECT * FROM read_parquet('{data_path}')
             """
             self.duckdb_connection.execute(create_sql)
@@ -315,9 +311,9 @@ class DuckLakeManager:
             )
             self.duckdb_connection.execute(
                 f"""
-                INSERT INTO {schema_name}.snowducks_queries 
-                (query_hash, query_text, first_seen, last_used, usage_count, 
-                 avg_execution_time_ms, total_rows_fetched, created_by, 
+                INSERT INTO {schema_name}.snowducks_queries
+                (query_hash, query_text, first_seen, last_used, usage_count,
+                 avg_execution_time_ms, total_rows_fetched, created_by,
                  last_refresh, cache_max_age_hours)
                 VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
             """,
@@ -336,13 +332,15 @@ class DuckLakeManager:
 
             # Store query metadata including LIMIT information
             self.duckdb_connection.execute(
-                f"DELETE FROM {schema_name}.snowducks_query_metadata WHERE query_hash = ?",
+                f"DELETE FROM {schema_name}.snowducks_query_metadata "
+                "WHERE query_hash = ?",
                 [query_hash],
             )
             self.duckdb_connection.execute(
                 f"""
                 INSERT INTO {schema_name}.snowducks_query_metadata
-                (query_hash, original_query, query_without_limit, limit_value, has_limit, created_at)
+                (query_hash, original_query, query_without_limit,
+                 limit_value, has_limit, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
             """,
                 [
@@ -357,21 +355,21 @@ class DuckLakeManager:
 
             # Delete existing cache metadata and insert new one
             self.duckdb_connection.execute(
-                f"DELETE FROM {schema_name}.snowducks_cache_metadata WHERE query_hash = ?",
+                f"DELETE FROM {schema_name}.snowducks_cache_metadata "
+                "WHERE query_hash = ?",
                 [query_hash],
             )
 
             # Calculate expiration time based on cache_max_age_hours
-            expires_at = (
-                now + timedelta(hours=self.config.cache_max_age_hours)
-                if self.config.cache_max_age_hours > 0
-                else None
-            )
+            if self.config.cache_max_age_hours > 0:
+                expires_at = now + timedelta(hours=self.config.cache_max_age_hours)
+            else:
+                expires_at = None
 
             self.duckdb_connection.execute(
                 f"""
                 INSERT INTO {schema_name}.snowducks_cache_metadata
-                (query_hash, table_name, file_count, total_size_bytes, 
+                (query_hash, table_name, file_count, total_size_bytes,
                  row_count, created_at, expires_at, created_by)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -403,11 +401,13 @@ class DuckLakeManager:
         schema_name = self._get_schema_name()
         # Delete existing user record and insert new one
         self.duckdb_connection.execute(
-            f"DELETE FROM {schema_name}.snowducks_users WHERE user_id = ?", [user_id]
+            f"DELETE FROM {schema_name}.snowducks_users WHERE user_id = ?",
+            [user_id],
         )
         self.duckdb_connection.execute(
             f"""
-            INSERT INTO {schema_name}.snowducks_users (user_id, first_seen, last_seen, total_queries, environment)
+            INSERT INTO {schema_name}.snowducks_users
+            (user_id, first_seen, last_seen, total_queries, environment)
             VALUES (?, ?, ?, 1, ?)
         """,
             [user_id, now, now, self.config.deployment_mode],
@@ -418,8 +418,9 @@ class DuckLakeManager:
         schema_name = self._get_schema_name()
         result = self.duckdb_connection.execute(
             f"""
-            SELECT query_hash, query_text, usage_count, avg_execution_time_ms, last_used
-            FROM {schema_name}.snowducks_queries 
+            SELECT query_hash, query_text, usage_count,
+                   avg_execution_time_ms, last_used
+            FROM {schema_name}.snowducks_queries
             ORDER BY usage_count DESC, last_used DESC
             LIMIT ?
         """,
@@ -443,7 +444,7 @@ class DuckLakeManager:
         result = self.duckdb_connection.execute(
             f"""
             SELECT query_hash, query_text, usage_count, last_used
-            FROM {schema_name}.snowducks_queries 
+            FROM {schema_name}.snowducks_queries
             ORDER BY last_used DESC
             LIMIT ?
         """,
@@ -466,7 +467,7 @@ class DuckLakeManager:
         result = self.duckdb_connection.execute(
             f"""
             SELECT query_hash, query_text, usage_count, last_used
-            FROM {schema_name}.snowducks_queries 
+            FROM {schema_name}.snowducks_queries
             WHERE query_text ILIKE ?
             ORDER BY usage_count DESC, last_used DESC
             LIMIT ?
@@ -505,7 +506,8 @@ class DuckLakeManager:
         ).fetchone()[0]
         total_size = (
             self.duckdb_connection.execute(
-                f"SELECT SUM(total_size_bytes) FROM {schema_name}.snowducks_cache_metadata"
+                "SELECT SUM(total_size_bytes) FROM "
+                f"{schema_name}.snowducks_cache_metadata"
             ).fetchone()[0]
             or 0
         )
@@ -541,22 +543,23 @@ class DuckLakeManager:
         # Get expired query hashes
         expired_queries = self.duckdb_connection.execute(
             f"""
-            SELECT query_hash FROM {schema_name}.snowducks_queries 
-            WHERE last_refresh < ?
+            SELECT query_hash, table_name
+            FROM {schema_name}.snowducks_cache_metadata
+            WHERE expires_at IS NOT NULL AND expires_at < ?
         """,
             [cutoff_time],
         ).fetchall()
 
         cleaned_count = 0
-        for (query_hash,) in expired_queries:
+        for query_hash, table_name in expired_queries:
             try:
                 # Drop the cached table
-                fq_table_name = f"{schema_name}.{query_hash}"
-                self.duckdb_connection.execute(f"DROP TABLE IF EXISTS {fq_table_name}")
+                self.duckdb_connection.execute(f"DROP TABLE IF EXISTS {table_name}")
 
                 # Remove metadata
                 self.duckdb_connection.execute(
-                    f"DELETE FROM {schema_name}.snowducks_cache_metadata WHERE query_hash = ?",
+                    f"DELETE FROM {schema_name}.snowducks_cache_metadata "
+                    "WHERE query_hash = ?",
                     [query_hash],
                 )
 
@@ -623,8 +626,9 @@ class DuckLakeManager:
                     time.sleep(1)  # Wait 1 second before retrying
                 else:
                     raise DuckLakeError(
-                        f"Could not acquire database lock after {max_attempts} seconds. "
-                        "Another process may be using the database."
+                        "Could not acquire database lock after "
+                        f"{max_attempts} seconds. Another process may be "
+                        "using the database."
                     )
 
     def _release_lock(self) -> None:
@@ -659,10 +663,10 @@ class DuckLakeManager:
 
             # Get schema information
             result = self.duckdb_connection.execute(
-                f"""
-                SELECT column_name, data_type 
-                FROM information_schema.columns 
-                WHERE table_name = ? 
+                """
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name = ?
                 ORDER BY ordinal_position
             """,
                 [table_name.split(".")[-1]],
@@ -678,6 +682,110 @@ class DuckLakeManager:
             raise DuckLakeError(
                 f"Failed to get schema for table {table_name}: {e}"
             ) from e
+
+    def clear_cache_by_hash(self, query_hash: str) -> int:
+        """Clear cache for a specific query hash."""
+        schema_name = self._get_schema_name()
+        # Get the full list of tables to drop for a specific query hash
+        tables_to_drop = self.duckdb_connection.execute(
+            f"SELECT table_name FROM {schema_name}.snowducks_cache_metadata "
+            "WHERE query_hash = ?",
+            [query_hash],
+        ).fetchall()
+        for (table_to_drop,) in tables_to_drop:
+            try:
+                self.duckdb_connection.execute(
+                    f'DROP TABLE IF EXISTS "{table_to_drop}"'
+                )
+                if self.config.deployment_mode == "local":
+                    # For local mode, also delete the Parquet file
+                    parquet_file = (
+                        self.config.ducklake_data_path / f"{table_to_drop}.parquet"
+                    )
+                    if parquet_file.exists():
+                        parquet_file.unlink()
+            except Exception as e:
+                print(f"Warning: could not drop table {table_to_drop}: {e}")
+
+        # Delete all metadata related to this query hash
+        self.duckdb_connection.execute(
+            f"DELETE FROM {schema_name}.snowducks_cache_metadata WHERE query_hash = ?",
+            [query_hash],
+        )
+        self.duckdb_connection.commit()
+        return len(tables_to_drop)
+
+    def get_table_schema_from_query(self, original_query: str) -> List[Dict[str, str]]:
+        """Get schema from Snowflake by executing the query with LIMIT 0."""
+        try:
+            # Get config for Snowflake connection
+            config = SnowDucksConfig.from_env()
+
+            # Query Snowflake directly via ADBC for schema only
+            from adbc_driver_snowflake import dbapi as snowflake_adbc
+            import urllib.parse
+
+            # URL-encode the password to handle special characters like #
+            encoded_password = urllib.parse.quote(config.snowflake_password, safe="")
+
+            # Build URI according to ADBC documentation format
+            # Format: user:password@account/database?param1=value1&paramN=valueN
+            conn_uri = (
+                f"{config.snowflake_user}:{encoded_password}@"
+                f"{config.snowflake_account}/{config.snowflake_database}?"
+                f"warehouse={config.snowflake_warehouse}&"
+                f"role={config.snowflake_role}"
+            )
+
+            with snowflake_adbc.connect(uri=conn_uri) as conn:
+                with conn.cursor() as cursor:
+                    # Execute the query with LIMIT 0 to get schema only (no data)
+                    limited_query = f"SELECT * FROM ({original_query}) LIMIT 0"
+                    cursor.execute(limited_query)
+
+                    # Get column information from cursor description
+                    schema = []
+                    for col in cursor.description:
+                        col_name = col[0]
+                        col_type = col[1]
+
+                        # Map Snowflake types to DuckDB types
+                        duckdb_type = "VARCHAR"  # Default
+                        if col_type in [1, 2, 3]:  # Numeric types
+                            duckdb_type = "DOUBLE"
+                        elif col_type == 4:  # Float
+                            duckdb_type = "DOUBLE"
+                        elif col_type == 5:  # String
+                            duckdb_type = "VARCHAR"
+                        elif col_type == 6:  # Date
+                            duckdb_type = "DATE"
+                        elif col_type == 7:  # Time
+                            duckdb_type = "TIME"
+                        elif col_type == 8:  # Timestamp
+                            duckdb_type = "TIMESTAMP"
+                        elif col_type == 9:  # Boolean
+                            duckdb_type = "BOOLEAN"
+                        elif col_type == 10:  # Binary
+                            duckdb_type = "BLOB"
+                        elif col_type == 11:  # Decimal
+                            duckdb_type = "DECIMAL"
+                        elif col_type == 12:  # Array
+                            duckdb_type = "VARCHAR"  # Convert arrays to strings
+                        elif col_type == 13:  # Object
+                            duckdb_type = "VARCHAR"  # Convert objects to strings
+                        elif col_type == 14:  # Variant
+                            duckdb_type = "VARCHAR"  # Convert variants to strings
+
+                        schema.append({"name": col_name, "type": duckdb_type})
+
+            return schema
+
+        except Exception as e:
+            # Return a default schema on error
+            import sys
+
+            print(f"Error in get_table_schema_from_query: {e}", file=sys.stderr)
+            return [{"name": "message", "type": "VARCHAR"}]
 
 
 def get_table_schema_from_query(original_query: str) -> List[Dict[str, str]]:
@@ -695,7 +803,12 @@ def get_table_schema_from_query(original_query: str) -> List[Dict[str, str]]:
 
         # Build URI according to ADBC documentation format
         # Format: user:password@account/database?param1=value1&paramN=valueN
-        conn_uri = f"{config.snowflake_user}:{encoded_password}@{config.snowflake_account}/{config.snowflake_database}?warehouse={config.snowflake_warehouse}&role={config.snowflake_role}"
+        conn_uri = (
+            f"{config.snowflake_user}:{encoded_password}@"
+            f"{config.snowflake_account}/{config.snowflake_database}?"
+            f"warehouse={config.snowflake_warehouse}&"
+            f"role={config.snowflake_role}"
+        )
 
         with snowflake_adbc.connect(uri=conn_uri) as conn:
             with conn.cursor() as cursor:
@@ -751,12 +864,6 @@ def get_table_schema_from_query(original_query: str) -> List[Dict[str, str]]:
 def get_table_schema(table_name: str) -> List[Dict[str, str]]:
     """Standalone function to get table schema for CLI use."""
     try:
-        # Extract query hash from table name (table_name should be like "t_<hash>")
-        if table_name.startswith("t_"):
-            query_hash = table_name[2:]  # Remove "t_" prefix
-        else:
-            query_hash = table_name
-
         # Get config for Snowflake connection
         config = SnowDucksConfig.from_env()
 
@@ -780,6 +887,6 @@ def get_table_schema(table_name: str) -> List[Dict[str, str]]:
 
         return [{"name": "result", "type": "VARCHAR"}]
 
-    except Exception as e:
+    except Exception:
         # Return a default schema on error
         return [{"name": "message", "type": "VARCHAR"}]

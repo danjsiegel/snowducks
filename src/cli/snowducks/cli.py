@@ -4,7 +4,6 @@ SnowDucks CLI - Instant SQL for Snowflake with DuckLake Caching
 """
 
 import sys
-import os
 from pathlib import Path
 
 from .core import (
@@ -12,11 +11,8 @@ from .core import (
     test_connection,
     get_cache_stats,
     clear_cache,
-    register_snowflake_udf,
     snowflake_query,
 )
-from .config import SnowDucksConfig
-from .utils import generate_normalized_query_hash
 
 
 def main():

@@ -5,28 +5,25 @@ This script starts a DuckDB interactive session with the snowflake_query UDF
 already registered and ready to use.
 """
 
-import duckdb
-import re
-import signal
-import sys
 import atexit
 import os
+import re
+import signal
 import subprocess
+import sys
+import duckdb
 import pyarrow as pa
-
-# Add the cli directory to the Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from snowducks.core import register_snowflake_udf
 from snowducks.config import SnowDucksConfig
 
+# Add the cli directory to the Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Global connection for cleanup
 con = None
 
 
 def cleanup_connection():
     """Clean up the DuckDB connection on exit."""
-    global con
     if con:
         try:
             con.close()
@@ -208,7 +205,8 @@ def main():
             ducklake_attach_string = config.get_ducklake_attach_string()
             data_path = str(config.ducklake_data_path)
             con.execute(
-                f"ATTACH '{ducklake_attach_string}' AS snowducks_ducklake (DATA_PATH '{data_path}')"
+                f"ATTACH '{ducklake_attach_string}' AS snowducks_ducklake "
+                f"(DATA_PATH '{data_path}')"
             )
 
         else:
@@ -235,7 +233,8 @@ def main():
         # Check if we're in interactive mode
         if not is_interactive():
             print(
-                "⚠️  Non-interactive mode detected. Use interactive mode for best experience.",
+                "⚠️  Non-interactive mode detected. "
+                "Use interactive mode for best experience.",
                 file=sys.stderr,
             )
             print("   Run: ./snowducks cli (without piping input)", file=sys.stderr)
@@ -244,7 +243,7 @@ def main():
         print("📖 Usage Examples:", file=sys.stderr)
         print("  -- Direct table-like usage (recommended):", file=sys.stderr)
         print(
-            "     SELECT * FROM snowflake_query('SELECT * FROM my_table LIMIT 100')",
+            "     SELECT * FROM " "snowflake_query('SELECT * FROM my_table LIMIT 100')",
             file=sys.stderr,
         )
         print(file=sys.stderr)
@@ -262,7 +261,8 @@ def main():
         print(file=sys.stderr)
         print("  -- Use in CTEs and joins:", file=sys.stderr)
         print(
-            "     WITH data AS (SELECT * FROM snowflake_query('SELECT ...', 1000, false))",
+            "     WITH data AS (SELECT * FROM "
+            "snowflake_query('SELECT ...', 1000, false))",
             file=sys.stderr,
         )
         print("     SELECT * FROM data WHERE column > 100", file=sys.stderr)
