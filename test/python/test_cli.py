@@ -6,8 +6,7 @@ import os
 import tempfile
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-from io import StringIO
+from unittest.mock import patch
 
 import pytest
 
@@ -206,7 +205,7 @@ class TestCLI:
         import sys
 
         old_stdout = sys.stdout
-        sys.stdout = captured_output = StringIO()
+        sys.stdout = StringIO()
 
         try:
             # Mock sys.argv
@@ -233,7 +232,7 @@ class TestCLI:
         import sys
 
         old_stdout = sys.stdout
-        sys.stdout = captured_output = StringIO()
+        sys.stdout = StringIO()
 
         try:
             # Mock sys.argv
@@ -280,16 +279,12 @@ class TestCLI:
         import sys
 
         old_stderr = sys.stderr
-        sys.stderr = captured_stderr = StringIO()
+        sys.stderr = StringIO()
 
         try:
             # Mock sys.argv
             with patch("sys.argv", ["snowducks"]):
                 main()
-
-                # Check help message
-                stderr_output = captured_stderr.getvalue()
-                # The help should be printed to stdout, not stderr
 
         finally:
             sys.stderr = old_stderr
@@ -561,7 +556,7 @@ class TestCLIArgumentParsing:
         import sys
 
         old_stdout = sys.stdout
-        sys.stdout = captured_output = StringIO()
+        sys.stdout = StringIO()
 
         try:
             # Mock sys.argv with quoted query
@@ -595,7 +590,7 @@ class TestCLIArgumentParsing:
         import sys
 
         old_stdout = sys.stdout
-        sys.stdout = captured_output = StringIO()
+        sys.stdout = StringIO()
 
         try:
             # Mock sys.argv with special characters

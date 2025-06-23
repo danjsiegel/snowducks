@@ -2,7 +2,6 @@
 Tests for the core module.
 """
 
-import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -14,16 +13,11 @@ from snowducks.core import (
     _validate_single_query,
     _has_limit_clause,
     register_snowflake_udf,
-    configure,
     test_connection,
-    _config,
-    _ducklake_manager,
 )
 from snowducks.exceptions import (
     QueryError,
-    PermissionError,
     ConnectionError,
-    ConfigError,
     SnowDucksError,
 )
 from snowducks.config import SnowDucksConfig
@@ -69,7 +63,7 @@ class TestCoreFunctions:
             "SELECT * FROM table1 WHERE id = 1",
             "SELECT * FROM table1;",  # Single semicolon at end is OK
             "SELECT * FROM table1 WHERE name = 'John; Smith'",  # Semicolon in string
-            'SELECT * FROM table1 WHERE name = "John; Smith"',  # Semicolon in double quotes
+            'SELECT * FROM table1 WHERE name = "John; Smith"',  # Semicolon in "
         ]
 
         for query in valid_queries:
@@ -191,7 +185,7 @@ class TestCoreFunctions:
         with patch("adbc_driver_snowflake.dbapi.connect") as mock_connect:
             mock_connect.return_value = mock_connection
 
-            with patch("pyarrow.parquet.write_table") as mock_write_table:
+            with patch("pyarrow.parquet.write_table"):
                 with patch("pyarrow.parquet.read_metadata") as mock_read_metadata:
                     mock_read_metadata.return_value.num_rows = 100
 
@@ -233,11 +227,11 @@ class TestCoreFunctions:
         with patch("adbc_driver_snowflake.dbapi.connect") as mock_connect:
             mock_connect.return_value = mock_connection
 
-            with patch("pyarrow.parquet.write_table") as mock_write_table:
+            with patch("pyarrow.parquet.write_table"):
                 with patch("pyarrow.parquet.read_metadata") as mock_read_metadata:
                     mock_read_metadata.return_value.num_rows = 100
 
-                    result = snowflake_query("SELECT * FROM test_table")
+                    result = snowflake_query("SELECT * FROM test_table")  # noqa: F841
 
                     # Should have called execute with LIMIT clause
                     mock_cursor.execute.assert_called_once()
@@ -277,11 +271,11 @@ class TestCoreFunctions:
         with patch("adbc_driver_snowflake.dbapi.connect") as mock_connect:
             mock_connect.return_value = mock_connection
 
-            with patch("pyarrow.parquet.write_table") as mock_write_table:
+            with patch("pyarrow.parquet.write_table"):
                 with patch("pyarrow.parquet.read_metadata") as mock_read_metadata:
                     mock_read_metadata.return_value.num_rows = 100
 
-                    result = snowflake_query("SELECT * FROM test_table")
+                    result = snowflake_query("SELECT * FROM test_table")  # noqa: F841
 
                     # Should have called execute with LIMIT clause
                     mock_cursor.execute.assert_called_once()
@@ -321,12 +315,14 @@ class TestCoreFunctions:
         with patch("adbc_driver_snowflake.dbapi.connect") as mock_connect:
             mock_connect.return_value = mock_connection
 
-            with patch("pyarrow.parquet.write_table") as mock_write_table:
+            with patch("pyarrow.parquet.write_table"):
                 with patch("pyarrow.parquet.read_metadata") as mock_read_metadata:
                     mock_read_metadata.return_value.num_rows = 100
 
                     # Test with explicit limit=-1 to bypass the default limit
-                    result = snowflake_query("SELECT * FROM test_table", limit=-1)
+                    result = snowflake_query(  # noqa: F841
+                        "SELECT * FROM test_table", limit=-1
+                    )
 
                     # Should have called execute without LIMIT clause
                     mock_cursor.execute.assert_called_once()

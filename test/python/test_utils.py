@@ -2,7 +2,6 @@
 Tests for shared utilities module.
 """
 
-import pytest
 from snowducks.utils import (
     generate_query_hash,
     normalize_query_text,
@@ -201,16 +200,20 @@ class TestLimitAwareHashing:
     def test_parse_query_metadata_complex_query(self):
         """Test query metadata parsing with complex query."""
         query = """
-            SELECT u.id, u.name, o.order_date 
-            FROM users u 
-            JOIN orders o ON u.id = o.user_id 
-            WHERE o.status = 'completed' 
-            ORDER BY o.order_date DESC 
+            SELECT u.id, u.name, o.order_date
+            FROM users u
+            JOIN orders o ON u.id = o.user_id
+            WHERE o.status = 'completed'
+            ORDER BY o.order_date DESC
             LIMIT 500 OFFSET 100
         """
         metadata = parse_query_metadata(query)
 
-        expected_without_limit = "select u.id, u.name, o.order_date from users u join orders o on u.id = o.user_id where o.status = 'completed' order by o.order_date desc"
+        expected_without_limit = (
+            "select u.id, u.name, o.order_date from users u "
+            "join orders o on u.id = o.user_id "
+            "where o.status = 'completed' order by o.order_date desc"
+        )
         assert metadata["original_query"] == query
         assert metadata["query_without_limit"] == expected_without_limit
         assert metadata["limit_value"] == 500
@@ -233,7 +236,7 @@ class TestTableNameValidation:
             "table_name",  # No t_ prefix
             "t_a1b2c3d4e5f6g7h",  # Too short
             "t_a1b2c3d4e5f6g7h8i",  # Too long
-            "t_a1b2c3d4e5f6g7h8g",  # Invalid hex char (g is valid, but this is too long)
+            "t_a1b2c3d4e5f6g7h8g",  # Invalid hex char (g is valid, but too long)
             "T_a1b2c3d4e5f6g7h8",  # Wrong case
             "t_a1b2c3d4e5f6g7h8_extra",  # Extra characters
             "t_a1b2c3d4e5f6g7h8z",  # Invalid hex char (z)
