@@ -9,9 +9,27 @@ __version__ = "0.1.0"
 __author__ = "SnowDucks Contributors"
 __email__ = "contributors@snowducks.dev"
 
-from .core import register_snowflake_udf, snowflake_query, fetch_from_snowflake, clear_cache, get_cache_stats, configure, test_connection, get_popular_queries, get_recent_queries, search_queries, cleanup_expired_cache
+from .core import (
+    register_snowflake_udf,
+    snowflake_query,
+    fetch_from_snowflake,
+    clear_cache,
+    get_cache_stats,
+    configure,
+    test_connection,
+    get_popular_queries,
+    get_recent_queries,
+    search_queries,
+    cleanup_expired_cache,
+)
 from .config import SnowDucksConfig
-from .exceptions import SnowDucksError, ConnectionError, CacheError, ConfigError, DuckLakeError
+from .exceptions import (
+    SnowDucksError,
+    ConnectionError,
+    CacheError,
+    ConfigError,
+    DuckLakeError,
+)
 
 __all__ = [
     "register_snowflake_udf",
@@ -31,4 +49,4 @@ __all__ = [
     "CacheError",
     "ConfigError",
     "DuckLakeError",
-] 
+]

@@ -28,6 +28,7 @@ class TestCLI:
     def mock_config(self, temp_dir):
         """Create a mock configuration."""
         from snowducks.config import SnowDucksConfig
+
         return SnowDucksConfig(
             snowflake_user="test_user",
             snowflake_password="test_password",
@@ -41,125 +42,160 @@ class TestCLI:
             default_row_limit=1000,
         )
 
-    @patch('snowducks.cli.configure')
-    @patch('snowducks.cli.snowflake_query')
+    @patch("snowducks.cli.configure")
+    @patch("snowducks.cli.snowflake_query")
     def test_get_schema_success(self, mock_query, mock_configure, mock_config):
         """Test successful get-schema execution."""
         mock_configure.return_value = mock_config
         mock_query.return_value = ("test_table_hash", "miss")
-        
+
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv for get-schema command
-            with patch('sys.argv', ['snowducks', 'get-schema', 'test_table', 'SELECT id, name FROM test_table']):
-                with patch('snowducks.ducklake_manager.get_table_schema_from_query') as mock_get_schema:
-                    mock_get_schema.return_value = [{"name": "id", "type": "INTEGER"}, {"name": "name", "type": "VARCHAR"}]
+            with patch(
+                "sys.argv",
+                [
+                    "snowducks",
+                    "get-schema",
+                    "test_table",
+                    "SELECT id, name FROM test_table",
+                ],
+            ):
+                with patch(
+                    "snowducks.ducklake_manager.get_table_schema_from_query"
+                ) as mock_get_schema:
+                    mock_get_schema.return_value = [
+                        {"name": "id", "type": "INTEGER"},
+                        {"name": "name", "type": "VARCHAR"},
+                    ]
                     main()
-                    
+
                     # Check that the function was called
-                    mock_get_schema.assert_called_once_with('SELECT id, name FROM test_table')
-                    
+                    mock_get_schema.assert_called_once_with(
+                        "SELECT id, name FROM test_table"
+                    )
+
                     # Parse the JSON output
                     output = captured_output.getvalue()
                     result = json.loads(output)
-                    
+
                     assert result["status"] == "success"
                     assert result["table_name"] == "test_table"
                     assert len(result["schema"]) == 2
-                    
+
         finally:
             sys.stdout = old_stdout
 
-    @patch('snowducks.cli.configure')
-    @patch('snowducks.cli.snowflake_query')
+    @patch("snowducks.cli.configure")
+    @patch("snowducks.cli.snowflake_query")
     def test_get_schema_failure(self, mock_query, mock_configure, mock_config):
         """Test get-schema execution failure."""
         mock_configure.return_value = mock_config
         mock_query.return_value = ("test_table_hash", "miss")
-        
+
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv for get-schema command
-            with patch('sys.argv', ['snowducks', 'get-schema', 'test_table', 'SELECT * FROM nonexistent_table']):
-                with patch('snowducks.ducklake_manager.get_table_schema_from_query') as mock_get_schema:
+            with patch(
+                "sys.argv",
+                [
+                    "snowducks",
+                    "get-schema",
+                    "test_table",
+                    "SELECT * FROM nonexistent_table",
+                ],
+            ):
+                with patch(
+                    "snowducks.ducklake_manager.get_table_schema_from_query"
+                ) as mock_get_schema:
                     mock_get_schema.side_effect = Exception("Test error")
                     main()
-                    
+
                     # Parse the JSON output
                     output = captured_output.getvalue()
                     result = json.loads(output)
-                    
+
                     assert result["status"] == "error"
                     assert "error" in result
                     assert "Test error" in result["error"]
-                    
+
         finally:
             sys.stdout = old_stdout
 
-    @patch('snowducks.cli.configure')
-    @patch('snowducks.cli.snowflake_query')
+    @patch("snowducks.cli.configure")
+    @patch("snowducks.cli.snowflake_query")
     def test_query_command_success(self, mock_query, mock_configure, mock_config):
         """Test successful query execution."""
         mock_configure.return_value = mock_config
         mock_query.return_value = ("test_table_hash", "miss")
-        
+
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv for query command
-            with patch('sys.argv', ['snowducks', 'query', '--query', 'SELECT id, name FROM test_table']):
+            with patch(
+                "sys.argv",
+                ["snowducks", "query", "--query", "SELECT id, name FROM test_table"],
+            ):
                 main()
-            
+
             # Get the output
             output = captured_output.getvalue()
-            
+
             # The query command prints to stdout, not JSON
             assert "Cache table: test_table_hash" in output
             assert "Status: miss" in output
-            
+
         finally:
             sys.stdout = old_stdout
 
-    @patch('snowducks.cli.configure')
-    @patch('snowducks.cli.snowflake_query')
+    @patch("snowducks.cli.configure")
+    @patch("snowducks.cli.snowflake_query")
     def test_query_command_failure(self, mock_query, mock_configure, mock_config):
         """Test query execution failure."""
         mock_configure.return_value = mock_config
         mock_query.side_effect = QueryError("Test error")
-        
+
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv for query command
-            with patch('sys.argv', ['snowducks', 'query', '--query', 'SELECT * FROM nonexistent_table']):
+            with patch(
+                "sys.argv",
+                ["snowducks", "query", "--query", "SELECT * FROM nonexistent_table"],
+            ):
                 result = main()
-                
+
                 # Check that it returns error code
                 assert result == 1
-                
+
                 # Get the output
                 output = captured_output.getvalue()
-                
+
                 assert "Error: Test error" in output
-                
+
         finally:
             sys.stdout = old_stdout
 
@@ -168,19 +204,25 @@ class TestCLI:
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv
-            with patch('sys.argv', ['snowducks', 'get-schema', 'test_table', 'SELECT * FROM test']):
-                with patch('snowducks.ducklake_manager.get_table_schema_from_query') as mock_get_schema:
+            with patch(
+                "sys.argv",
+                ["snowducks", "get-schema", "test_table", "SELECT * FROM test"],
+            ):
+                with patch(
+                    "snowducks.ducklake_manager.get_table_schema_from_query"
+                ) as mock_get_schema:
                     mock_get_schema.return_value = [{"name": "id", "type": "INTEGER"}]
                     main()
-                    
+
                     # Check that the function was called
-                    mock_get_schema.assert_called_once_with('SELECT * FROM test')
-                    
+                    mock_get_schema.assert_called_once_with("SELECT * FROM test")
+
         finally:
             sys.stdout = old_stdout
 
@@ -189,21 +231,24 @@ class TestCLI:
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv
-            with patch('sys.argv', ['snowducks', 'query', '--query', 'SELECT * FROM test']):
-                with patch('snowducks.cli.snowflake_query') as mock_query:
+            with patch(
+                "sys.argv", ["snowducks", "query", "--query", "SELECT * FROM test"]
+            ):
+                with patch("snowducks.cli.snowflake_query") as mock_query:
                     mock_query.return_value = ("test_table_hash", "miss")
                     result = main()
-                    
+
                     # Check that the function was called
                     mock_query.assert_called_once()
                     # Check that it returned success
                     assert result == 0
-                    
+
         finally:
             sys.stdout = old_stdout
 
@@ -212,18 +257,19 @@ class TestCLI:
         # Capture stdout (the error message goes to stdout, not stderr)
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv
-            with patch('sys.argv', ['snowducks', 'invalid-command']):
+            with patch("sys.argv", ["snowducks", "invalid-command"]):
                 main()
-                
+
                 # Check error message
                 output = captured_output.getvalue()
                 assert "Unknown command" in output
-                
+
         finally:
             sys.stdout = old_stdout
 
@@ -232,18 +278,19 @@ class TestCLI:
         # Capture stderr
         from io import StringIO
         import sys
+
         old_stderr = sys.stderr
         sys.stderr = captured_stderr = StringIO()
-        
+
         try:
             # Mock sys.argv
-            with patch('sys.argv', ['snowducks']):
+            with patch("sys.argv", ["snowducks"]):
                 main()
-                
+
                 # Check help message
                 stderr_output = captured_stderr.getvalue()
                 # The help should be printed to stdout, not stderr
-                
+
         finally:
             sys.stderr = old_stderr
 
@@ -252,19 +299,20 @@ class TestCLI:
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv with no arguments (should show help)
-            with patch('sys.argv', ['snowducks']):
+            with patch("sys.argv", ["snowducks"]):
                 main()
-                
+
                 # Check help message
                 output = captured_output.getvalue()
                 assert "SnowDucks CLI" in output
                 assert "Commands:" in output
-                
+
         finally:
             sys.stdout = old_stdout
 
@@ -297,12 +345,13 @@ DUCKLAKE_DATA_PATH={temp_path}/data
             env_file.write_text(env_content)
             yield temp_path
 
-    @patch('snowducks.cli.snowflake_query')
-    @patch('snowducks.cli.configure')
+    @patch("snowducks.cli.snowflake_query")
+    @patch("snowducks.cli.configure")
     def test_cli_with_mocked_config(self, mock_configure, mock_query, temp_env):
         """Test CLI with mocked configuration loading."""
         # Mock the configuration
         from snowducks.config import SnowDucksConfig
+
         mock_config = SnowDucksConfig(
             snowflake_user="test_user",
             snowflake_password="test_password",
@@ -317,42 +366,46 @@ DUCKLAKE_DATA_PATH={temp_path}/data
         )
         mock_configure.return_value = mock_config
         mock_query.return_value = ("test_table_hash", "miss")
-        
+
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Change to the temp directory
             old_cwd = os.getcwd()
             os.chdir(temp_env)
-            
+
             # Mock sys.argv for query command
-            with patch('sys.argv', ['snowducks', 'query', '--query', 'SELECT 1 as test']):
+            with patch(
+                "sys.argv", ["snowducks", "query", "--query", "SELECT 1 as test"]
+            ):
                 result = main()
-                
+
                 # Check that it returned success
                 assert result == 0
-                
+
                 # Get the output
                 output = captured_output.getvalue()
-                
+
                 # The actual cache table name will be generated from the query hash
                 assert "Cache table:" in output
                 assert "Status: miss" in output
-                
+
         finally:
             sys.stdout = old_stdout
             os.chdir(old_cwd)
 
-    @patch('snowducks.cli.snowflake_query')
-    @patch('snowducks.cli.configure')
+    @patch("snowducks.cli.snowflake_query")
+    @patch("snowducks.cli.configure")
     def test_cli_with_cache_hit(self, mock_configure, mock_query, temp_env):
         """Test CLI with cache hit scenario."""
         # Mock the configuration
         from snowducks.config import SnowDucksConfig
+
         mock_config = SnowDucksConfig(
             snowflake_user="test_user",
             snowflake_password="test_password",
@@ -367,32 +420,35 @@ DUCKLAKE_DATA_PATH={temp_path}/data
         )
         mock_configure.return_value = mock_config
         mock_query.return_value = ("test_table_hash", "hit")
-        
+
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Change to the temp directory
             old_cwd = os.getcwd()
             os.chdir(temp_env)
-            
+
             # Mock sys.argv for query command
-            with patch('sys.argv', ['snowducks', 'query', '--query', 'SELECT 1 as test']):
+            with patch(
+                "sys.argv", ["snowducks", "query", "--query", "SELECT 1 as test"]
+            ):
                 result = main()
-                
+
                 # Check that it returned success
                 assert result == 0
-                
+
                 # Get the output
                 output = captured_output.getvalue()
-                
+
                 # The actual cache table name will be generated from the query hash
                 assert "Cache table:" in output
                 assert "Status: hit" in output
-                
+
         finally:
             sys.stdout = old_stdout
             os.chdir(old_cwd)
@@ -401,64 +457,71 @@ DUCKLAKE_DATA_PATH={temp_path}/data
 class TestCLIErrorHandling:
     """Test error handling in CLI."""
 
-    @patch('snowducks.cli.snowflake_query')
-    @patch('snowducks.cli.configure')
+    @patch("snowducks.cli.snowflake_query")
+    @patch("snowducks.cli.configure")
     def test_configuration_error(self, mock_configure, mock_query):
         """Test CLI with configuration error."""
         # The error should happen during snowflake_query, not configure
         mock_configure.return_value = None  # configure succeeds
         mock_query.side_effect = ConfigError("Configuration error")
-        
+
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv for query command
-            with patch('sys.argv', ['snowducks', 'query', '--query', 'SELECT 1 as test']):
+            with patch(
+                "sys.argv", ["snowducks", "query", "--query", "SELECT 1 as test"]
+            ):
                 result = main()
-                
+
                 # Check that it returned error code
                 assert result == 1
-                
+
                 # Get the output
                 output = captured_output.getvalue()
-                
+
                 assert "Error: Configuration error" in output
-                
+
         finally:
             sys.stdout = old_stdout
 
-    @patch('snowducks.cli.snowflake_query')
-    @patch('snowducks.cli.configure')
+    @patch("snowducks.cli.snowflake_query")
+    @patch("snowducks.cli.configure")
     def test_connection_error(self, mock_configure, mock_query):
         """Test CLI with connection error."""
         from snowducks.exceptions import ConnectionError
+
         # The error should happen during snowflake_query, not configure
         mock_configure.return_value = None  # configure succeeds
         mock_query.side_effect = ConnectionError("Connection failed")
-        
+
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv for query command
-            with patch('sys.argv', ['snowducks', 'query', '--query', 'SELECT 1 as test']):
+            with patch(
+                "sys.argv", ["snowducks", "query", "--query", "SELECT 1 as test"]
+            ):
                 result = main()
-                
+
                 # Check that it returned error code
                 assert result == 1
-                
+
                 # Get the output
                 output = captured_output.getvalue()
-                
+
                 assert "Error: Connection failed" in output
-                
+
         finally:
             sys.stdout = old_stdout
 
@@ -467,22 +530,23 @@ class TestCLIErrorHandling:
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv with missing arguments
-            with patch('sys.argv', ['snowducks', 'get-schema', 'test_table']):
+            with patch("sys.argv", ["snowducks", "get-schema", "test_table"]):
                 result = main()
-                
+
                 # Check that it returned error code
                 assert result == 1
-                
+
                 # Get the output
                 output = captured_output.getvalue()
-                
+
                 assert "Error: Table name and original query required" in output
-                
+
         finally:
             sys.stdout = old_stdout
 
@@ -495,19 +559,32 @@ class TestCLIArgumentParsing:
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv with quoted query
-            with patch('sys.argv', ['snowducks', 'get-schema', 'test_table', 'SELECT * FROM "users" WHERE name = \'John\'']):
-                with patch('snowducks.ducklake_manager.get_table_schema_from_query') as mock_get_schema:
+            with patch(
+                "sys.argv",
+                [
+                    "snowducks",
+                    "get-schema",
+                    "test_table",
+                    "SELECT * FROM \"users\" WHERE name = 'John'",
+                ],
+            ):
+                with patch(
+                    "snowducks.ducklake_manager.get_table_schema_from_query"
+                ) as mock_get_schema:
                     mock_get_schema.return_value = [{"name": "id", "type": "INTEGER"}]
                     main()
-                    
+
                     # Check that the function was called with the correct query
-                    mock_get_schema.assert_called_once_with('SELECT * FROM "users" WHERE name = \'John\'')
-                    
+                    mock_get_schema.assert_called_once_with(
+                        "SELECT * FROM \"users\" WHERE name = 'John'"
+                    )
+
         finally:
             sys.stdout = old_stdout
 
@@ -516,20 +593,29 @@ class TestCLIArgumentParsing:
         # Capture stdout
         from io import StringIO
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = captured_output = StringIO()
-        
+
         try:
             # Mock sys.argv with special characters
-            with patch('sys.argv', ['snowducks', 'query', '--query', 'SELECT * FROM users WHERE name LIKE \'%test%\'']):
-                with patch('snowducks.cli.snowflake_query') as mock_query:
+            with patch(
+                "sys.argv",
+                [
+                    "snowducks",
+                    "query",
+                    "--query",
+                    "SELECT * FROM users WHERE name LIKE '%test%'",
+                ],
+            ):
+                with patch("snowducks.cli.snowflake_query") as mock_query:
                     mock_query.return_value = ("test_table_hash", "miss")
                     result = main()
-                    
+
                     # Check that the function was called
                     mock_query.assert_called_once()
                     # Check that it returned success
                     assert result == 0
-                    
+
         finally:
-            sys.stdout = old_stdout 
+            sys.stdout = old_stdout

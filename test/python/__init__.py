@@ -1,1 +1,1 @@
-# Tests package for SnowDucks 
+# Tests package for SnowDucks

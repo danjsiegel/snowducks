@@ -17,9 +17,15 @@ from snowducks.core import (
     configure,
     test_connection,
     _config,
-    _ducklake_manager
+    _ducklake_manager,
 )
-from snowducks.exceptions import QueryError, PermissionError, ConnectionError, ConfigError, SnowDucksError
+from snowducks.exceptions import (
+    QueryError,
+    PermissionError,
+    ConnectionError,
+    ConfigError,
+    SnowDucksError,
+)
 from snowducks.config import SnowDucksConfig
 
 
@@ -63,9 +69,9 @@ class TestCoreFunctions:
             "SELECT * FROM table1 WHERE id = 1",
             "SELECT * FROM table1;",  # Single semicolon at end is OK
             "SELECT * FROM table1 WHERE name = 'John; Smith'",  # Semicolon in string
-            "SELECT * FROM table1 WHERE name = \"John; Smith\"",  # Semicolon in double quotes
+            'SELECT * FROM table1 WHERE name = "John; Smith"',  # Semicolon in double quotes
         ]
-        
+
         for query in valid_queries:
             # Should not raise an exception
             _validate_single_query(query)
@@ -77,7 +83,7 @@ class TestCoreFunctions:
             "SELECT 1; SELECT 2; SELECT 3",
             "CREATE TABLE test (id INT); INSERT INTO test VALUES (1)",
         ]
-        
+
         for query in invalid_queries:
             with pytest.raises(QueryError, match="Multiple SQL statements detected"):
                 _validate_single_query(query)
@@ -101,10 +107,10 @@ class TestCoreFunctions:
             "SELECT * FROM table1 ORDER BY id LIMIT 1000",
             "SELECT * FROM table1 LIMIT 100;",
         ]
-        
+
         for query in limit_queries:
             assert _has_limit_clause(query) is True
-        
+
         # Queries without LIMIT
         no_limit_queries = [
             "SELECT * FROM table1",
@@ -112,7 +118,7 @@ class TestCoreFunctions:
             "SELECT * FROM table1 ORDER BY id",
             "SELECT * FROM table1 WHERE name LIKE '%limit%'",  # 'limit' in string
         ]
-        
+
         for query in no_limit_queries:
             assert _has_limit_clause(query) is False
 
@@ -124,7 +130,7 @@ class TestCoreFunctions:
         WHERE id > 0 /* Another comment mentioning limit */
         """
         assert _has_limit_clause(query) is False
-        
+
         # Query with actual LIMIT clause
         query_with_limit = """
         SELECT * FROM table1 -- This query has a limit
@@ -132,10 +138,13 @@ class TestCoreFunctions:
         """
         assert _has_limit_clause(query_with_limit) is True
 
-    def test_snowflake_query_multiple_statements(self, mock_config, mock_ducklake_manager):
+    def test_snowflake_query_multiple_statements(
+        self, mock_config, mock_ducklake_manager
+    ):
         """Test query with multiple statements."""
         # Set up global config
         import snowducks.core
+
         snowducks.core._config = mock_config
         snowducks.core._ducklake_manager = mock_ducklake_manager
 
@@ -146,6 +155,7 @@ class TestCoreFunctions:
         """Test query without configuration."""
         # Reset global config
         import snowducks.core
+
         snowducks.core._config = None
         snowducks.core._ducklake_manager = None
 
@@ -156,6 +166,7 @@ class TestCoreFunctions:
         """Test basic Snowflake query execution."""
         # Set up global config
         import snowducks.core
+
         snowducks.core._config = mock_config
         snowducks.core._ducklake_manager = mock_ducklake_manager
 
@@ -166,26 +177,26 @@ class TestCoreFunctions:
         # Mock the ADBC connection and Arrow reader
         mock_arrow_table = MagicMock()
         mock_arrow_table.schema = MagicMock()
-        
+
         mock_reader = MagicMock()
         mock_reader.read_all.return_value = mock_arrow_table
-        
+
         mock_cursor = MagicMock()
         mock_cursor.fetch_arrow_reader.return_value = mock_reader
-        
+
         mock_connection = MagicMock()
         mock_connection.__enter__.return_value = mock_connection
         mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
-        
-        with patch('adbc_driver_snowflake.dbapi.connect') as mock_connect:
+
+        with patch("adbc_driver_snowflake.dbapi.connect") as mock_connect:
             mock_connect.return_value = mock_connection
-            
-            with patch('pyarrow.parquet.write_table') as mock_write_table:
-                with patch('pyarrow.parquet.read_metadata') as mock_read_metadata:
+
+            with patch("pyarrow.parquet.write_table") as mock_write_table:
+                with patch("pyarrow.parquet.read_metadata") as mock_read_metadata:
                     mock_read_metadata.return_value.num_rows = 100
-                    
+
                     result = snowflake_query("SELECT * FROM test_table")
-                    
+
                     assert isinstance(result, tuple)
                     assert len(result) == 2
                     assert result[0] == "test_table_hash"
@@ -197,6 +208,7 @@ class TestCoreFunctions:
         """Test Snowflake query with automatic LIMIT addition."""
         # Set up global config
         import snowducks.core
+
         snowducks.core._config = mock_config
         snowducks.core._ducklake_manager = mock_ducklake_manager
 
@@ -207,35 +219,38 @@ class TestCoreFunctions:
         # Mock the ADBC connection and Arrow reader
         mock_arrow_table = MagicMock()
         mock_arrow_table.schema = MagicMock()
-        
+
         mock_reader = MagicMock()
         mock_reader.read_all.return_value = mock_arrow_table
-        
+
         mock_cursor = MagicMock()
         mock_cursor.fetch_arrow_reader.return_value = mock_reader
-        
+
         mock_connection = MagicMock()
         mock_connection.__enter__.return_value = mock_connection
         mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
-        
-        with patch('adbc_driver_snowflake.dbapi.connect') as mock_connect:
+
+        with patch("adbc_driver_snowflake.dbapi.connect") as mock_connect:
             mock_connect.return_value = mock_connection
-            
-            with patch('pyarrow.parquet.write_table') as mock_write_table:
-                with patch('pyarrow.parquet.read_metadata') as mock_read_metadata:
+
+            with patch("pyarrow.parquet.write_table") as mock_write_table:
+                with patch("pyarrow.parquet.read_metadata") as mock_read_metadata:
                     mock_read_metadata.return_value.num_rows = 100
-                    
+
                     result = snowflake_query("SELECT * FROM test_table")
-                    
+
                     # Should have called execute with LIMIT clause
                     mock_cursor.execute.assert_called_once()
                     call_args = mock_cursor.execute.call_args[0][0]
                     assert "LIMIT 1000" in call_args
 
-    def test_snowflake_query_unlimited_egress_disabled(self, mock_config, mock_ducklake_manager):
+    def test_snowflake_query_unlimited_egress_disabled(
+        self, mock_config, mock_ducklake_manager
+    ):
         """Test query with unlimited egress disabled."""
         # Set up global config
         import snowducks.core
+
         snowducks.core._config = mock_config
         snowducks.core._ducklake_manager = mock_ducklake_manager
 
@@ -248,35 +263,38 @@ class TestCoreFunctions:
         # Mock the ADBC connection and Arrow reader
         mock_arrow_table = MagicMock()
         mock_arrow_table.schema = MagicMock()
-        
+
         mock_reader = MagicMock()
         mock_reader.read_all.return_value = mock_arrow_table
-        
+
         mock_cursor = MagicMock()
         mock_cursor.fetch_arrow_reader.return_value = mock_reader
-        
+
         mock_connection = MagicMock()
         mock_connection.__enter__.return_value = mock_connection
         mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
-        
-        with patch('adbc_driver_snowflake.dbapi.connect') as mock_connect:
+
+        with patch("adbc_driver_snowflake.dbapi.connect") as mock_connect:
             mock_connect.return_value = mock_connection
-            
-            with patch('pyarrow.parquet.write_table') as mock_write_table:
-                with patch('pyarrow.parquet.read_metadata') as mock_read_metadata:
+
+            with patch("pyarrow.parquet.write_table") as mock_write_table:
+                with patch("pyarrow.parquet.read_metadata") as mock_read_metadata:
                     mock_read_metadata.return_value.num_rows = 100
-                    
+
                     result = snowflake_query("SELECT * FROM test_table")
-                    
+
                     # Should have called execute with LIMIT clause
                     mock_cursor.execute.assert_called_once()
                     call_args = mock_cursor.execute.call_args[0][0]
                     assert "LIMIT 1000" in call_args
 
-    def test_snowflake_query_unlimited_egress_enabled(self, mock_config, mock_ducklake_manager):
+    def test_snowflake_query_unlimited_egress_enabled(
+        self, mock_config, mock_ducklake_manager
+    ):
         """Test query with unlimited egress enabled."""
         # Set up global config
         import snowducks.core
+
         snowducks.core._config = mock_config
         snowducks.core._ducklake_manager = mock_ducklake_manager
 
@@ -289,27 +307,27 @@ class TestCoreFunctions:
         # Mock the ADBC connection and Arrow reader
         mock_arrow_table = MagicMock()
         mock_arrow_table.schema = MagicMock()
-        
+
         mock_reader = MagicMock()
         mock_reader.read_all.return_value = mock_arrow_table
-        
+
         mock_cursor = MagicMock()
         mock_cursor.fetch_arrow_reader.return_value = mock_reader
-        
+
         mock_connection = MagicMock()
         mock_connection.__enter__.return_value = mock_connection
         mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
-        
-        with patch('adbc_driver_snowflake.dbapi.connect') as mock_connect:
+
+        with patch("adbc_driver_snowflake.dbapi.connect") as mock_connect:
             mock_connect.return_value = mock_connection
-            
-            with patch('pyarrow.parquet.write_table') as mock_write_table:
-                with patch('pyarrow.parquet.read_metadata') as mock_read_metadata:
+
+            with patch("pyarrow.parquet.write_table") as mock_write_table:
+                with patch("pyarrow.parquet.read_metadata") as mock_read_metadata:
                     mock_read_metadata.return_value.num_rows = 100
-                    
+
                     # Test with explicit limit=-1 to bypass the default limit
                     result = snowflake_query("SELECT * FROM test_table", limit=-1)
-                    
+
                     # Should have called execute without LIMIT clause
                     mock_cursor.execute.assert_called_once()
                     call_args = mock_cursor.execute.call_args[0][0]
@@ -319,16 +337,17 @@ class TestCoreFunctions:
         """Test successful connection test."""
         # Set up global config
         import snowducks.core
+
         snowducks.core._config = mock_config
-        
+
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = [1]
-        
+
         mock_connection = MagicMock()
         mock_connection.__enter__.return_value = mock_connection
         mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
-        
-        with patch('adbc_driver_snowflake.dbapi.connect') as mock_connect:
+
+        with patch("adbc_driver_snowflake.dbapi.connect") as mock_connect:
             mock_connect.return_value = mock_connection
 
             assert test_connection() is True
@@ -339,9 +358,10 @@ class TestCoreFunctions:
         """Test failed connection test."""
         # Set up global config
         import snowducks.core
+
         snowducks.core._config = mock_config
-        
-        with patch('adbc_driver_snowflake.dbapi.connect') as mock_connect:
+
+        with patch("adbc_driver_snowflake.dbapi.connect") as mock_connect:
             mock_connect.side_effect = Exception("Connection failed")
 
             assert test_connection() is False
@@ -350,15 +370,16 @@ class TestCoreFunctions:
         """Test basic UDF registration."""
         # Set up global config
         import snowducks.core
+
         snowducks.core._config = mock_config
         snowducks.core._ducklake_manager = mock_ducklake_manager
 
         # Mock DuckDB connection
         mock_connection = MagicMock()
-        
+
         # Should register the UDF successfully
         register_snowflake_udf(mock_connection)
-        
+
         # Should have called create_function
         mock_connection.create_function.assert_called_once()
 
@@ -366,12 +387,13 @@ class TestCoreFunctions:
         """Test UDF registration failure."""
         # Set up global config
         import snowducks.core
+
         snowducks.core._config = mock_config
         snowducks.core._ducklake_manager = mock_ducklake_manager
 
         # Mock DuckDB connection that raises an error
         mock_connection = MagicMock()
         mock_connection.create_function.side_effect = Exception("Registration failed")
-        
+
         with pytest.raises(SnowDucksError, match="Failed to register UDF"):
-            register_snowflake_udf(mock_connection) 
+            register_snowflake_udf(mock_connection)

@@ -19,7 +19,9 @@ class TestSnowDucksConfig:
     def test_from_env_missing_required_params(self):
         """Test that missing required parameters raise ConfigError."""
         with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(ConfigError, match="Missing required environment variables"):
+            with pytest.raises(
+                ConfigError, match="Missing required environment variables"
+            ):
                 SnowDucksConfig.from_env(load_env_file=False)
 
     def test_from_env_password_auth(self):
@@ -46,7 +48,9 @@ class TestSnowDucksConfig:
 
     def test_from_env_key_pair_auth(self):
         """Test configuration with key pair authentication."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.p8', delete=False) as temp_key:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".p8", delete=False
+        ) as temp_key:
             temp_key.write("test private key content")
             temp_key.flush()
             temp_key_path = temp_key.name
@@ -65,7 +69,9 @@ class TestSnowDucksConfig:
             with patch.dict(os.environ, env_vars, clear=True):
                 config = SnowDucksConfig.from_env(load_env_file=False)
                 assert config.snowflake_user == "test_user"
-                assert config.snowflake_private_key_path == temp_key_path, f"Expected {temp_key_path}, got {config.snowflake_private_key_path}"
+                assert (
+                    config.snowflake_private_key_path == temp_key_path
+                ), f"Expected {temp_key_path}, got {config.snowflake_private_key_path}"
                 assert config.snowflake_private_key_passphrase == "test_passphrase"
         finally:
             os.unlink(temp_key_path)
@@ -141,13 +147,13 @@ class TestSnowDucksConfig:
             snowflake_warehouse="test_warehouse",
             snowflake_role="test_role",
         )
-        
+
         # Should not raise any exception
         config.validate()
 
     def test_validate_key_pair_auth(self):
         """Test validation with key pair authentication."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.p8') as temp_key:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".p8") as temp_key:
             temp_key.write("test private key content")
             temp_key.flush()
 
@@ -159,7 +165,7 @@ class TestSnowDucksConfig:
                 snowflake_warehouse="test_warehouse",
                 snowflake_role="test_role",
             )
-            
+
             # Should not raise any exception
             config.validate()
 
@@ -173,13 +179,15 @@ class TestSnowDucksConfig:
             snowflake_warehouse="test_warehouse",
             snowflake_role="test_role",
         )
-        
+
         # Should not raise any exception
         config.validate()
 
     def test_validate_no_auth_method(self):
         """Test validation with no authentication method."""
-        with pytest.raises(ConfigError, match="No valid authentication method configured"):
+        with pytest.raises(
+            ConfigError, match="No valid authentication method configured"
+        ):
             SnowDucksConfig(
                 snowflake_user="test_user",
                 snowflake_account="test_account",
@@ -216,7 +224,9 @@ class TestSnowDucksConfig:
 
     def test_validate_negative_cache_age(self):
         """Test validation with negative cache age."""
-        with pytest.raises(ConfigError, match="CACHE_MAX_AGE_HOURS must be non-negative"):
+        with pytest.raises(
+            ConfigError, match="CACHE_MAX_AGE_HOURS must be non-negative"
+        ):
             SnowDucksConfig(
                 snowflake_user="test_user",
                 snowflake_password="test_password",
@@ -247,7 +257,7 @@ class TestSnowDucksConfig:
 
     def test_get_snowflake_connection_uri_key_pair(self):
         """Test Snowflake connection URI generation with key pair auth."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.p8') as temp_key:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".p8") as temp_key:
             temp_key.write("test private key content")
             temp_key.flush()
 
@@ -283,7 +293,7 @@ class TestSnowDucksConfig:
             postgres_user="snowducks_user",
             postgres_password="snowducks_password",
         )
-        
+
         attach_string = config.get_ducklake_attach_string()
         assert attach_string.startswith("ducklake:postgres:")
         assert "dbname=snowducks_metadata" in attach_string
@@ -308,7 +318,7 @@ class TestSnowDucksConfig:
             postgres_user="snowducks_user",
             postgres_password="snowducks_password",
         )
-        
+
         attach_string = config.get_ducklake_attach_string()
         assert attach_string.startswith("ducklake:postgres:")
         assert "dbname=snowducks_metadata" in attach_string
@@ -326,7 +336,7 @@ class TestSnowDucksConfig:
             snowflake_warehouse="test_warehouse",
             snowflake_role="test_role",
         )
-        
+
         assert config.deployment_mode == "local"
         assert config.s3_bucket is None
 
@@ -341,6 +351,6 @@ class TestSnowDucksConfig:
             snowflake_warehouse="test_warehouse",
             snowflake_role="test_role",
         )
-        
+
         assert config.deployment_mode == "cloud"
-        assert config.s3_bucket == "test-bucket" 
+        assert config.s3_bucket == "test-bucket"

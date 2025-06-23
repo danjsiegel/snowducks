@@ -141,7 +141,7 @@ jobs:
       run: make build
 
     - name: Upload extension artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: snowducks-extension
         path: build/release/extension/snowducks/snowducks.duckdb_extension
