@@ -10,7 +10,6 @@ SnowDucks provides a unified interface for querying Snowflake data with automati
 - **💾 Intelligent Caching**: Automatic Parquet file caching with smart invalidation
 - **🔗 Seamless Integration**: Works as both a DuckDB extension and Python CLI
 - **⚡ Performance**: Local DuckDB performance for cached data
-- **🔄 Automatic Sync**: Fresh data from Snowflake when cache is stale
 - **🎯 Guaranteed Data Availability**: Ensures data is fetched and cached before query execution
 
 ## Key Features
@@ -442,7 +441,7 @@ SnowDucks implements a carefully designed order of operations to ensure data ava
 ### 🏗️ Architectural Rearchitecture: Pure C++ Implementation
 
 **The Problem I Built Myself Into:**
-So I built the Python CLI stuff in isolation without really reading the DuckDB extension docs properly. I got it fully working with the DuckDB CLI, then I tried to import the UDF to the DuckDB UI, turns out you can't actually do that. 
+So I built the Python CLI stuff in isolation without really reading the DuckDB extension docs properly. I got it fully working with the DuckDB CLI as a UDF, then I tried to import the UDF to the DuckDB UI, turns out you can't actually do that. 
 
 **What I Was Doing Wrong:**
 I was trying to load a Python UDF into the DuckDB UI, but it needed to be compiled binaries (`.duckdb_extension` files) that are platform-specific and version-tied (or I'm just an idiot and I don't know what I'm talking about. Either is viable). The extension-template requires you to actually build a C++ binary that gets distributed for specific platforms (linux_amd64, osx_arm64, etc.). You can't just load Python code directly (FML) it has to go through the proper extension framework with signed binaries.
@@ -451,9 +450,9 @@ I was trying to load a Python UDF into the DuckDB UI, but it needed to be compil
 
 #### 🎯 What I Should Have Done From The Start
 - **Kill the Python Stuff**: Remove `venv/`, Python CLI, and all that Python runtime baggage
-- **Go Native with ADBC**: Use Apache Arrow Database Connectivity (ADBC) to talk directly to Snowflake from C++
+- **Go Native with ADBC**: Use Apache Arrow Database Connectivity (ADBC) to talk directly to Snowflake from C++ (no lazy shortcut of just using it from the venv)
 - **One Extension to Rule Them All**: Single C++ extension that handles both data fetching and caching
-- **Actually Work with DuckDB UI**: Full integration with DuckDB's native web interface and CLI (the way it's supposed to work)
+- **Actually Work with DuckDB UI**: Full integration with DuckDB's native web interface and CLI (the way it's supposed to work, vs right now it's a mix of 2 code bases I merged)
 Based on DuckLake's capabilities and community feedback opportunities, here are potential enhancements for future versions:
 
 ### 🗄️ Additional Storage Backends
@@ -468,7 +467,7 @@ Based on DuckLake's capabilities and community feedback opportunities, here are 
 - **Environment-Specific Configs**: Dev/staging/prod configurations
 
 ### 🌐 Integration Features
-- **dbt Integration**: Work with dbt models and transformations
+- **dbt Integration**: Work with dbt models and transformations (OPEN SOURCE FUSION!) 
 - **Airflow Integration**: Apache Airflow operators
 - **Kubernetes**: Native K8s deployment support
 
@@ -486,4 +485,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Made with ❤️ by the SnowDucks community**
+**Made with ❤️ by the SnowDucks community (me)**
