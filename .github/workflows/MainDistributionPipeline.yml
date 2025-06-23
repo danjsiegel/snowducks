@@ -41,7 +41,7 @@ jobs:
 
     - name: Setup Python
       uses: actions/setup-python@v4
-    with:
+      with:
         python-version: '3.9'
 
     - name: Install system dependencies
@@ -95,7 +95,7 @@ jobs:
 
     - name: Setup Python
       uses: actions/setup-python@v4
-    with:
+      with:
         python-version: '3.9'
 
     - name: Install dependencies
@@ -142,6 +142,6 @@ jobs:
 
     - name: Upload extension artifact
       uses: actions/upload-artifact@v3
-    with:
+      with:
         name: snowducks-extension
         path: build/release/extension/snowducks/snowducks.duckdb_extension
