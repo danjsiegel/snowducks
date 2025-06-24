@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Test runner script for SnowDucks
-# This script runs both Python and C++ tests
+# This script runs both Python and C++ tests, including code quality checks
 
 set -e  # Exit on any error
 
@@ -12,6 +12,7 @@ echo "=========================="
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Function to print colored output
@@ -27,13 +28,17 @@ print_warning() {
     echo -e "${YELLOW}⚠${NC} $1"
 }
 
+print_info() {
+    echo -e "${BLUE}ℹ${NC} $1"
+}
+
 # Check if we're in the right directory
 if [ ! -f "CMakeLists.txt" ]; then
     print_error "Please run this script from the project root directory"
     exit 1
 fi
 
-# Run Python tests
+# Run Python tests (including code quality tests)
 echo ""
 echo "🐍 Running Python Tests..."
 echo "-------------------------"
