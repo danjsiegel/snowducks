@@ -41,7 +41,8 @@ def signal_handler(signum, frame):
 def process_snowflake_query(con, query):
     """
     Process queries that use snowflake_query() in FROM clauses.
-    Automatically calls the UDF to get table names and replaces them in the query.
+    Automatically calls the UDF to get table names and replaces them in the
+    query.
     """
     # Find the start of snowflake_query function call
     start_match = re.search(
@@ -255,7 +256,8 @@ def main():
         print(file=sys.stderr)
         print("  -- Force refresh cache:", file=sys.stderr)
         print(
-            "     SELECT * FROM snowflake_query('SELECT * FROM my_table', 1000, true)",
+            "     SELECT * FROM snowflake_query('SELECT * FROM my_table', "
+            "1000, true)",
             file=sys.stderr,
         )
         print(file=sys.stderr)
@@ -268,7 +270,7 @@ def main():
         print("     SELECT * FROM data WHERE column > 100", file=sys.stderr)
         print(file=sys.stderr)
         print(
-            "💡 The UDF works like a real table - use it in FROM, JOIN, CTEs, etc!",
+            "💡 The UDF works like a real table - use it in FROM, JOIN, CTEs, " "etc!",
             file=sys.stderr,
         )
         print(file=sys.stderr)

@@ -5,7 +5,7 @@ DuckLake manager for SnowDucks - handles DuckLake database operations and cache 
 import time
 import fcntl
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, TextIO
 import duckdb
 
 from .config import SnowDucksConfig
@@ -23,8 +23,8 @@ class DuckLakeManager:
         self.config = config
         self.duckdb_connection: Optional[duckdb.DuckDBPyConnection] = None
         self.ducklake_attached = False
-        self.lock_file = None
-        self.lock_fd = None
+        self.lock_file: Optional[TextIO] = None
+        self.lock_fd: Optional[int] = None
 
         # Initialize DuckLake
         self._init_ducklake()
@@ -63,6 +63,8 @@ class DuckLakeManager:
 
     def _drop_metadata_tables(self) -> None:
         """Drop existing metadata tables to ensure clean schema."""
+        if not self.duckdb_connection:
+            return
         try:
             schema_name = self._get_schema_name()
             self.duckdb_connection.execute(
@@ -79,6 +81,8 @@ class DuckLakeManager:
 
     def _create_metadata_tables(self) -> None:
         """Create metadata tables for tracking queries and cache information."""
+        if not self.duckdb_connection:
+            return
         # Determine the schema name based on the configuration
         schema_name = self._get_schema_name()
 
@@ -163,7 +167,7 @@ class DuckLakeManager:
 
     def _is_cache_fresh(self, query_hash: str) -> bool:
         """Check if cached data is fresh based on cache_max_age_hours."""
-        if self.config.cache_force_refresh:
+        if self.config.cache_force_refresh or not self.duckdb_connection:
             return False
 
         schema_name = self._get_schema_name()
@@ -193,6 +197,8 @@ class DuckLakeManager:
 
     def _table_exists(self, fq_table_name: str) -> bool:
         """Check if a table exists in DuckLake."""
+        if not self.duckdb_connection:
+            return False
         schema_name, table_name = fq_table_name.split(".", 1)
 
         # Check in the expected schema first
@@ -204,7 +210,7 @@ class DuckLakeManager:
             [schema_name, table_name],
         ).fetchone()
 
-        if result[0] > 0:
+        if result and result[0] and result[0] > 0:
             return True
 
         # Fallback: check in main schema (for old cached tables)
@@ -216,7 +222,7 @@ class DuckLakeManager:
             [table_name],
         ).fetchone()
 
-        return result[0] > 0
+        return bool(result and result[0] and result[0] > 0)
 
     def get_cached_table_name(self, query_text: str) -> Optional[str]:
         """Get the cached table name for a query if it exists and is fresh."""
@@ -238,6 +244,8 @@ class DuckLakeManager:
 
     def _check_limit_metadata(self, query_hash: str, limit_value: int) -> bool:
         """Check if the cached query has the same LIMIT value."""
+        if not self.duckdb_connection:
+            return False
         schema_name = self._get_schema_name()
         result = self.duckdb_connection.execute(
             f"""
@@ -255,6 +263,8 @@ class DuckLakeManager:
 
     def _update_cache_usage(self, query_hash: str) -> None:
         """Update the last_used timestamp and usage count for a cache hit."""
+        if not self.duckdb_connection:
+            return
         now = datetime.now(timezone.utc)
         schema_name = self._get_schema_name()
         self.duckdb_connection.execute(
@@ -275,6 +285,9 @@ class DuckLakeManager:
         execution_time_ms: Optional[int] = None,
     ) -> str:
         """Create a cached table in DuckLake from a Parquet file."""
+        if not self.duckdb_connection:
+            raise DuckLakeError("DuckDB connection not available")
+
         query_hash = self._generate_query_hash(query_text)
         table_name = query_hash
         schema_name = self._get_schema_name()
@@ -366,6 +379,7 @@ class DuckLakeManager:
             else:
                 expires_at = None
 
+            file_count = file_info[0] if file_info else 0
             self.duckdb_connection.execute(
                 f"""
                 INSERT INTO {schema_name}.snowducks_cache_metadata
@@ -376,7 +390,7 @@ class DuckLakeManager:
                 [
                     query_hash,
                     fq_table_name,
-                    file_info[0],
+                    file_count,
                     total_size,
                     row_count,
                     now,
@@ -398,6 +412,8 @@ class DuckLakeManager:
 
     def _update_user_stats(self, user_id: str, now: datetime) -> None:
         """Update user statistics."""
+        if not self.duckdb_connection:
+            return
         schema_name = self._get_schema_name()
         # Delete existing user record and insert new one
         self.duckdb_connection.execute(
@@ -415,6 +431,8 @@ class DuckLakeManager:
 
     def get_popular_queries(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get the most frequently used queries."""
+        if not self.duckdb_connection:
+            return []
         schema_name = self._get_schema_name()
         result = self.duckdb_connection.execute(
             f"""
@@ -440,6 +458,8 @@ class DuckLakeManager:
 
     def get_recent_queries(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get recently executed queries."""
+        if not self.duckdb_connection:
+            return []
         schema_name = self._get_schema_name()
         result = self.duckdb_connection.execute(
             f"""
@@ -462,14 +482,16 @@ class DuckLakeManager:
         ]
 
     def search_queries(self, search_term: str, limit: int = 20) -> List[Dict[str, Any]]:
-        """Search queries by text content."""
+        """Search queries by text."""
+        if not self.duckdb_connection:
+            return []
         schema_name = self._get_schema_name()
         result = self.duckdb_connection.execute(
             f"""
             SELECT query_hash, query_text, usage_count, last_used
             FROM {schema_name}.snowducks_queries
-            WHERE query_text ILIKE ?
-            ORDER BY usage_count DESC, last_used DESC
+            WHERE query_text LIKE ?
+            ORDER BY last_used DESC
             LIMIT ?
         """,
             [f"%{search_term}%", limit],
@@ -486,55 +508,28 @@ class DuckLakeManager:
         ]
 
     def get_cache_stats(self) -> Dict[str, Any]:
-        """Get cache statistics."""
+        """Get statistics about the cache."""
+        if not self.duckdb_connection:
+            return {}
         schema_name = self._get_schema_name()
-
-        # Query stats
-        query_count = self.duckdb_connection.execute(
-            f"SELECT COUNT(*) FROM {schema_name}.snowducks_queries"
-        ).fetchone()[0]
-        total_usage = (
-            self.duckdb_connection.execute(
-                f"SELECT SUM(usage_count) FROM {schema_name}.snowducks_queries"
-            ).fetchone()[0]
-            or 0
-        )
-
-        # Cache stats
-        cache_count = self.duckdb_connection.execute(
-            f"SELECT COUNT(*) FROM {schema_name}.snowducks_cache_metadata"
-        ).fetchone()[0]
-        total_size = (
-            self.duckdb_connection.execute(
-                "SELECT SUM(total_size_bytes) FROM "
-                f"{schema_name}.snowducks_cache_metadata"
-            ).fetchone()[0]
-            or 0
-        )
-
-        # User stats
-        user_count = self.duckdb_connection.execute(
-            f"SELECT COUNT(*) FROM {schema_name}.snowducks_users"
-        ).fetchone()[0]
-
+        result = self.duckdb_connection.execute(
+            f"""
+            SELECT COUNT(*), SUM(row_count), SUM(total_size_bytes)
+            FROM {schema_name}.snowducks_cache_metadata
+        """
+        ).fetchone()
+        if not result:
+            return {"table_count": 0, "total_rows": 0, "total_size_bytes": 0}
         return {
-            "ducklake_metadata_path": str(self.config.ducklake_metadata_path),
-            "ducklake_data_path": str(self.config.ducklake_data_path),
-            "total_queries": query_count,
-            "total_query_executions": total_usage,
-            "total_cache_entries": cache_count,
-            "total_cache_size_bytes": total_size,
-            "total_users": user_count,
-            "deployment_mode": self.config.deployment_mode,
-            "cache_max_age_hours": self.config.cache_max_age_hours,
-            "cache_force_refresh": self.config.cache_force_refresh,
+            "table_count": result[0] if result[0] is not None else 0,
+            "total_rows": result[1] if result[1] is not None else 0,
+            "total_size_bytes": result[2] if result[2] is not None else 0,
         }
 
     def cleanup_expired_cache(self) -> int:
         """Clean up expired cache entries based on cache_max_age_hours."""
-        if self.config.cache_max_age_hours <= 0:
+        if not self.duckdb_connection:
             return 0
-
         schema_name = self._get_schema_name()
         cutoff_time = datetime.now(timezone.utc) - timedelta(
             hours=self.config.cache_max_age_hours
@@ -573,6 +568,8 @@ class DuckLakeManager:
 
     def clear_all_cache(self) -> int:
         """Clear all cached tables and metadata."""
+        if not self.duckdb_connection:
+            return 0
         schema_name = self._get_schema_name()
 
         # Get all cached table names
@@ -613,14 +610,18 @@ class DuckLakeManager:
 
         # Create lock file if it doesn't exist
         self.lock_file = open(lock_path, "w")
+        if self.lock_file is None:
+            raise DuckLakeError("Failed to create lock file")
+
         self.lock_fd = self.lock_file.fileno()
 
         # Try to acquire exclusive lock with timeout
         max_attempts = 30  # 30 seconds timeout
         for attempt in range(max_attempts):
             try:
-                fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return  # Lock acquired successfully
+                if self.lock_fd is not None:
+                    fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    return  # Lock acquired successfully
             except (OSError, IOError):
                 if attempt < max_attempts - 1:
                     time.sleep(1)  # Wait 1 second before retrying
@@ -650,6 +651,8 @@ class DuckLakeManager:
 
     def get_table_schema(self, table_name: str) -> List[Dict[str, str]]:
         """Get schema information for a table as a list of column definitions."""
+        if not self.duckdb_connection:
+            return []
         try:
             schema_name = self._get_schema_name()
             fq_table_name = f"{schema_name}.{table_name}"
@@ -685,6 +688,8 @@ class DuckLakeManager:
 
     def clear_cache_by_hash(self, query_hash: str) -> int:
         """Clear cache for a specific query hash."""
+        if not self.duckdb_connection:
+            return 0
         schema_name = self._get_schema_name()
         # Get the full list of tables to drop for a specific query hash
         tables_to_drop = self.duckdb_connection.execute(
@@ -726,6 +731,8 @@ class DuckLakeManager:
             import urllib.parse
 
             # URL-encode the password to handle special characters like #
+            if not config.snowflake_password:
+                raise DuckLakeError("Snowflake password is required")
             encoded_password = urllib.parse.quote(config.snowflake_password, safe="")
 
             # Build URI according to ADBC documentation format
@@ -745,6 +752,83 @@ class DuckLakeManager:
 
                     # Get column information from cursor description
                     schema = []
+                    if cursor.description:
+                        for col in cursor.description:
+                            col_name = col[0]
+                            col_type = col[1]
+
+                            # Map Snowflake types to DuckDB types
+                            duckdb_type = "VARCHAR"  # Default
+                            if col_type in [1, 2, 3]:  # Numeric types
+                                duckdb_type = "DOUBLE"
+                            elif col_type == 4:  # Float
+                                duckdb_type = "DOUBLE"
+                            elif col_type == 5:  # String
+                                duckdb_type = "VARCHAR"
+                            elif col_type == 6:  # Date
+                                duckdb_type = "DATE"
+                            elif col_type == 7:  # Time
+                                duckdb_type = "TIME"
+                            elif col_type == 8:  # Timestamp
+                                duckdb_type = "TIMESTAMP"
+                            elif col_type == 9:  # Boolean
+                                duckdb_type = "BOOLEAN"
+                            elif col_type == 10:  # Binary
+                                duckdb_type = "BLOB"
+                            elif col_type == 11:  # Decimal
+                                duckdb_type = "DECIMAL"
+                            elif col_type == 12:  # Array
+                                duckdb_type = "VARCHAR"  # Convert arrays to strings
+                            elif col_type == 13:  # Object
+                                duckdb_type = "VARCHAR"  # Convert objects to strings
+                            elif col_type == 14:  # Variant
+                                duckdb_type = "VARCHAR"  # Convert variants to strings
+
+                            schema.append({"name": col_name, "type": duckdb_type})
+
+                return schema
+
+        except Exception as e:
+            # Return a default schema on error
+            import sys
+
+            print(f"Error in get_table_schema_from_query: {e}", file=sys.stderr)
+            return [{"name": "message", "type": "VARCHAR"}]
+
+
+def get_table_schema_from_query(original_query: str) -> List[Dict[str, str]]:
+    """Get schema from Snowflake by executing the query with LIMIT 0."""
+    try:
+        # Get config for Snowflake connection
+        config = SnowDucksConfig.from_env()
+
+        # Query Snowflake directly via ADBC for schema only
+        from adbc_driver_snowflake import dbapi as snowflake_adbc
+        import urllib.parse
+
+        # URL-encode the password to handle special characters like #
+        if not config.snowflake_password:
+            raise DuckLakeError("Snowflake password is required")
+        encoded_password = urllib.parse.quote(config.snowflake_password, safe="")
+
+        # Build URI according to ADBC documentation format
+        # Format: user:password@account/database?param1=value1&paramN=valueN
+        conn_uri = (
+            f"{config.snowflake_user}:{encoded_password}@"
+            f"{config.snowflake_account}/{config.snowflake_database}?"
+            f"warehouse={config.snowflake_warehouse}&"
+            f"role={config.snowflake_role}"
+        )
+
+        with snowflake_adbc.connect(uri=conn_uri) as conn:
+            with conn.cursor() as cursor:
+                # Execute the query with LIMIT 0 to get schema only (no data)
+                limited_query = f"SELECT * FROM ({original_query}) LIMIT 0"
+                cursor.execute(limited_query)
+
+                # Get column information from cursor description
+                schema = []
+                if cursor.description:
                     for col in cursor.description:
                         col_name = col[0]
                         col_type = col[1]
@@ -778,80 +862,7 @@ class DuckLakeManager:
 
                         schema.append({"name": col_name, "type": duckdb_type})
 
-            return schema
-
-        except Exception as e:
-            # Return a default schema on error
-            import sys
-
-            print(f"Error in get_table_schema_from_query: {e}", file=sys.stderr)
-            return [{"name": "message", "type": "VARCHAR"}]
-
-
-def get_table_schema_from_query(original_query: str) -> List[Dict[str, str]]:
-    """Get schema from Snowflake by executing the query with LIMIT 0."""
-    try:
-        # Get config for Snowflake connection
-        config = SnowDucksConfig.from_env()
-
-        # Query Snowflake directly via ADBC for schema only
-        from adbc_driver_snowflake import dbapi as snowflake_adbc
-        import urllib.parse
-
-        # URL-encode the password to handle special characters like #
-        encoded_password = urllib.parse.quote(config.snowflake_password, safe="")
-
-        # Build URI according to ADBC documentation format
-        # Format: user:password@account/database?param1=value1&paramN=valueN
-        conn_uri = (
-            f"{config.snowflake_user}:{encoded_password}@"
-            f"{config.snowflake_account}/{config.snowflake_database}?"
-            f"warehouse={config.snowflake_warehouse}&"
-            f"role={config.snowflake_role}"
-        )
-
-        with snowflake_adbc.connect(uri=conn_uri) as conn:
-            with conn.cursor() as cursor:
-                # Execute the query with LIMIT 0 to get schema only (no data)
-                limited_query = f"SELECT * FROM ({original_query}) LIMIT 0"
-                cursor.execute(limited_query)
-
-                # Get column information from cursor description
-                schema = []
-                for col in cursor.description:
-                    col_name = col[0]
-                    col_type = col[1]
-
-                    # Map Snowflake types to DuckDB types
-                    duckdb_type = "VARCHAR"  # Default
-                    if col_type in [1, 2, 3]:  # Numeric types
-                        duckdb_type = "DOUBLE"
-                    elif col_type == 4:  # Float
-                        duckdb_type = "DOUBLE"
-                    elif col_type == 5:  # String
-                        duckdb_type = "VARCHAR"
-                    elif col_type == 6:  # Date
-                        duckdb_type = "DATE"
-                    elif col_type == 7:  # Time
-                        duckdb_type = "TIME"
-                    elif col_type == 8:  # Timestamp
-                        duckdb_type = "TIMESTAMP"
-                    elif col_type == 9:  # Boolean
-                        duckdb_type = "BOOLEAN"
-                    elif col_type == 10:  # Binary
-                        duckdb_type = "BLOB"
-                    elif col_type == 11:  # Decimal
-                        duckdb_type = "DECIMAL"
-                    elif col_type == 12:  # Array
-                        duckdb_type = "VARCHAR"  # Convert arrays to strings
-                    elif col_type == 13:  # Object
-                        duckdb_type = "VARCHAR"  # Convert objects to strings
-                    elif col_type == 14:  # Variant
-                        duckdb_type = "VARCHAR"  # Convert variants to strings
-
-                    schema.append({"name": col_name, "type": duckdb_type})
-
-        return schema
+                return schema
 
     except Exception as e:
         # Return a default schema on error

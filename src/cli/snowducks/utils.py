@@ -1,6 +1,7 @@
 """
 Shared utilities for SnowDucks caching system.
-This module contains functions that should be consistent between CLI and UI components.
+This module contains functions that should be consistent
+between CLI and UI components.
 """
 
 import hashlib
@@ -10,10 +11,11 @@ from typing import Optional, Tuple, Dict, Any
 
 def extract_limit_from_query(query_text: str) -> Tuple[str, Optional[int]]:
     """
-    Extract LIMIT clause from query and return query without LIMIT and the limit value.
+    Extract LIMIT clause from query and return query
+    without LIMIT and the limit value.
 
-    This ensures that the same query with different LIMIT values gets the same hash,
-    but we can track the LIMIT separately in metadata.
+    This ensures that the same query with different LIMIT values gets the same
+    hash, but we can track the LIMIT separately in metadata.
 
     Args:
         query_text: The SQL query text

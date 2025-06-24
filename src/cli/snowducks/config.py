@@ -95,33 +95,34 @@ class SnowDucksConfig:
         # Environment detection
         deployment_mode = cls._detect_deployment_mode()
 
+        # Type assertion since we've already checked these are not None
         config = cls(
-            snowflake_user=required_params["snowflake_user"],
-            snowflake_account=required_params["snowflake_account"],
-            snowflake_database=required_params["snowflake_database"],
-            snowflake_warehouse=required_params["snowflake_warehouse"],
-            snowflake_role=required_params["snowflake_role"],
+            snowflake_user=required_params["snowflake_user"],  # type: ignore
+            snowflake_account=required_params["snowflake_account"],  # type: ignore
+            snowflake_database=required_params["snowflake_database"],  # type: ignore
+            snowflake_warehouse=required_params["snowflake_warehouse"],  # type: ignore
+            snowflake_role=required_params["snowflake_role"],  # type: ignore
             deployment_mode=deployment_mode,
             **auth_method,
         )
 
         # Optional parameters
         if os.getenv("SNOWFLAKE_AUTHENTICATOR"):
-            config.snowflake_authenticator = os.getenv("SNOWFLAKE_AUTHENTICATOR")
+            config.snowflake_authenticator = os.getenv("SNOWFLAKE_AUTHENTICATOR")  # type: ignore
 
         # DuckLake paths
         if os.getenv("DUCKLAKE_METADATA_PATH"):
-            config.ducklake_metadata_path = Path(os.getenv("DUCKLAKE_METADATA_PATH"))
+            config.ducklake_metadata_path = Path(os.getenv("DUCKLAKE_METADATA_PATH"))  # type: ignore
 
         if os.getenv("DUCKLAKE_DATA_PATH"):
-            config.ducklake_data_path = Path(os.getenv("DUCKLAKE_DATA_PATH"))
+            config.ducklake_data_path = Path(os.getenv("DUCKLAKE_DATA_PATH"))  # type: ignore
 
         # S3 configuration
         if os.getenv("S3_BUCKET"):
             config.s3_bucket = os.getenv("S3_BUCKET")
 
         if os.getenv("AWS_REGION"):
-            config.aws_region = os.getenv("AWS_REGION")
+            config.aws_region = os.getenv("AWS_REGION")  # type: ignore
 
         if os.getenv("S3_ENDPOINT_URL"):
             config.s3_endpoint_url = os.getenv("S3_ENDPOINT_URL")
@@ -131,7 +132,7 @@ class SnowDucksConfig:
             config.postgres_host = os.getenv("POSTGRES_HOST")
 
         if os.getenv("POSTGRES_PORT"):
-            config.postgres_port = int(os.getenv("POSTGRES_PORT"))
+            config.postgres_port = int(os.getenv("POSTGRES_PORT"))  # type: ignore
 
         if os.getenv("POSTGRES_DATABASE"):
             config.postgres_database = os.getenv("POSTGRES_DATABASE")
@@ -143,25 +144,27 @@ class SnowDucksConfig:
             config.postgres_password = os.getenv("POSTGRES_PASSWORD")
 
         if os.getenv("POSTGRES_SCHEMA"):
-            config.postgres_schema = os.getenv("POSTGRES_SCHEMA")
+            config.postgres_schema = os.getenv("POSTGRES_SCHEMA")  # type: ignore
 
         # Cache recency
         if os.getenv("CACHE_MAX_AGE_HOURS"):
-            config.cache_max_age_hours = int(os.getenv("CACHE_MAX_AGE_HOURS"))
+            config.cache_max_age_hours = int(os.getenv("CACHE_MAX_AGE_HOURS"))  # type: ignore
 
         if os.getenv("CACHE_FORCE_REFRESH"):
-            config.cache_force_refresh = (
-                os.getenv("CACHE_FORCE_REFRESH").upper() == "TRUE"
-            )
+            cache_force_refresh_val = os.getenv("CACHE_FORCE_REFRESH")
+            if cache_force_refresh_val:
+                config.cache_force_refresh = cache_force_refresh_val.upper() == "TRUE"
 
         # Cost controls
         if os.getenv("ALLOW_UNLIMITED_EGRESS"):
-            config.allow_unlimited_egress = (
-                os.getenv("ALLOW_UNLIMITED_EGRESS").upper() == "TRUE"
-            )
+            allow_unlimited_egress_val = os.getenv("ALLOW_UNLIMITED_EGRESS")
+            if allow_unlimited_egress_val:
+                config.allow_unlimited_egress = (
+                    allow_unlimited_egress_val.upper() == "TRUE"
+                )
 
         if os.getenv("DEFAULT_ROW_LIMIT"):
-            config.default_row_limit = int(os.getenv("DEFAULT_ROW_LIMIT"))
+            config.default_row_limit = int(os.getenv("DEFAULT_ROW_LIMIT"))  # type: ignore
 
         return config
 

@@ -215,6 +215,8 @@ def snowflake_query(
         from adbc_driver_snowflake import dbapi as snowflake_adbc
 
         # URL-encode the password to handle special characters like #
+        if not config.snowflake_password:
+            raise ConnectionError("Snowflake password is required")
         encoded_password = urllib.parse.quote(config.snowflake_password, safe="")
 
         # Build URI according to ADBC documentation format
@@ -515,7 +517,7 @@ def test_connection() -> bool:
                 with conn.cursor() as cursor:
                     cursor.execute("SELECT 1")
                     result = cursor.fetchone()
-                    return result[0] == 1
+                    return bool(result and result[0] == 1)
 
         except Exception as adbc_error:
             print(
@@ -544,7 +546,7 @@ def test_connection() -> bool:
                 with conn.cursor() as cursor:
                     cursor.execute("SELECT 1")
                     result = cursor.fetchone()
-                    return result[0] == 1
+                    return bool(result and result[0] == 1)
 
     except Exception as e:
         print(f"Connection test failed: {e}")
