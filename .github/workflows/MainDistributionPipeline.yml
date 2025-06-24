@@ -115,7 +115,7 @@ jobs:
 
     - name: Check Python types
       run: |
-        mypy src/cli/ --ignore-missing-imports
+        mypy src/cli/
 
   build-extension:
     name: Build Extension
