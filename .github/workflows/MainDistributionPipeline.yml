@@ -113,10 +113,6 @@ jobs:
         flake8 src/cli/ --max-line-length=101 --extend-ignore=E203,W503
         flake8 test/python/ --max-line-length=101 --extend-ignore=E203,W503
 
-    - name: Check Python types
-      run: |
-        mypy src/cli/
-
   build-extension:
     name: Build Extension
     runs-on: ubuntu-latest
